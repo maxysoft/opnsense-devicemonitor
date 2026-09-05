@@ -223,7 +223,29 @@ HTML;
             }
             
             $count = count($devices);
-            $subject = "OPNsense: {$count} new device(s) detected";
+
+            // One dispatch carries one event type, so the first row decides
+            // the wording for the whole message.
+            $event = $devices[0]['pending_event'] ?? 'new';
+            $eventText = [
+                'new'  => 'new device(s) detected',
+                'up'   => 'device(s) came online',
+                'down' => 'device(s) went offline',
+            ];
+            $eventBadge = ['new' => 'NEW', 'up' => 'ONLINE', 'down' => 'OFFLINE'];
+            $eventColor = ['new' => '#1976d2', 'up' => '#2e7d32', 'down' => '#c62828'];
+            $bText = $eventBadge[$event] ?? $eventBadge['new'];
+            $bColor = $eventColor[$event] ?? $eventColor['new'];
+
+            $eventHeadline = [
+                'new'  => 'detected and require your attention',
+                'up'   => 'came back online',
+                'down' => 'went offline',
+            ];
+            $bNoun = ($event === 'new') ? 'new device(s)' : 'device(s)';
+            $headline = $eventHeadline[$event] ?? $eventHeadline['new'];
+
+            $subject = "OPNsense: {$count} " . ($eventText[$event] ?? $eventText['new']);
             $hostname = gethostname();
             $timestamp = date('Y-m-d H:i:s');
             
@@ -244,7 +266,7 @@ HTML;
         
         <!-- Summary -->
         <div style="background: #fff3e0; border-left: 4px solid #f6821f; padding: 20px; margin: 20px; border-radius: 8px;">
-            <strong style="color: #e65100; font-size: 20px;">{$count} new device(s)</strong> detected and require your attention
+            <strong style="color: #e65100; font-size: 20px;">{$count} {$bNoun}</strong> {$headline}
         </div>
         
         <!-- Content -->
@@ -288,6 +310,7 @@ HTML;
                     <tr>
                         <td style="padding: 12px; border-bottom: 1px solid #e9ecef;">
                             <span style="font-family: 'Courier New', monospace; background: #e3f2fd; padding: 4px 8px; border-radius: 4px; color: #1976d2; font-weight: 600;">{$mac}</span>
+                            <span style="background: {$bColor}; color: #ffffff; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; margin-left: 6px;">{$bText}</span>
                         </td>
                         <td style="padding: 12px; border-bottom: 1px solid #e9ecef; color: #2d3748; font-weight: 500;">{$vendor}</td>
                         <td style="padding: 12px; border-bottom: 1px solid #e9ecef; font-family: 'Courier New', monospace; color: #6c757d;">{$ip}</td>
@@ -462,10 +485,28 @@ HTML;
                 
                 $count = count($devices);
                 $hostname = gethostname();
-                
+
+                // One dispatch carries one event type, so the first row decides
+                // the wording for the whole message.
+                $event = $devices[0]['pending_event'] ?? 'new';
+                $wText = [
+                    'new'  => 'new device(s) detected',
+                    'up'   => 'device(s) came online',
+                    'down' => 'device(s) went offline',
+                ];
+                $wTitle = [
+                    'new'  => 'New Device(s) Detected',
+                    'up'   => 'Device(s) Came Online',
+                    'down' => 'Device(s) Went Offline',
+                ];
+                $wIcon = ['new' => '🔔', 'up' => '🟢', 'down' => '⚫'];
+                $eventText = $wText[$event] ?? $wText['new'];
+                $eventTitle = $wTitle[$event] ?? $wTitle['new'];
+                $icon = $wIcon[$event] ?? $wIcon['new'];
+
                 if ($type === 'ntfy') {
                     // NTFY.SH REAL
-                    $msg = "{$count} new device(s) detected:\n\n";
+                    $msg = "{$count} {$eventText}:\n\n";
                     foreach (array_slice($devices, 0, 5) as $d) {
                         $msg .= "• {$d['mac']} - {$d['vendor']} ({$d['ip']})\n";
                     }
@@ -477,7 +518,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_POST, 1);
                     curl_setopt($ch, CURLOPT_POSTFIELDS, $msg);
                     curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        "Title: 🔔 OPNsense: {$count} new device(s)",
+                        "Title: {$icon} OPNsense: {$count} {$eventText}",
                         'Tags: opnsense,network',
                         'Priority: ' . (($count > 3) ? '4' : '3')
                     ]);
@@ -499,7 +540,7 @@ HTML;
                     $payload = [
                         'username' => 'OPNsense Device Monitor',
                         'embeds' => [[
-                            'title' => "🔔 {$count} New Device(s) Detected",
+                            'title' => "{$icon} {$count} {$eventTitle}",
                             'description' => "Server: `$hostname`",
                             'color' => 3447003,
                             'fields' => $fields,

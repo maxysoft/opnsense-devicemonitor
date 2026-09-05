@@ -13,6 +13,12 @@
     </field>
 
     <field>
+        <id>devicemonitor.general.notify_events</id>
+        <label>Notify on</label>
+        <type>select_multiple</type>
+        <help>Which events raise a notification, on both the email and webhook channels. Clear the list to stop notifications without disabling the channels.</help>
+    </field>
+    <field>
         <id>devicemonitor.general.email_enabled</id>
         <label>Enable email notifications</label>
         <type>checkbox</type>

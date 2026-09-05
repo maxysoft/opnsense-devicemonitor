@@ -20,6 +20,20 @@
                  and performValidation() requires one once this is on, so
                  defaulting to 1 would make the model invalid with its own
                  defaults and abort the initial migration. -->
+            <!-- Which events raise a notification. Applies to both channels.
+                 Clearing it disables notifications without turning the
+                 channels off. -->
+            <notify_events type="OptionField">
+                <Default>new</Default>
+                <Required>Y</Required>
+                <Multiple>Y</Multiple>
+                <OptionValues>
+                    <new>A new device appears</new>
+                    <up>A known device comes online</up>
+                    <down>A known device goes offline</down>
+                </OptionValues>
+            </notify_events>
+
             <email_enabled type="BooleanField">
                 <Default>0</Default>
                 <Required>Y</Required>

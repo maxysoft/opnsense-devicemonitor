@@ -8,6 +8,7 @@
 {
     "enabled": {{ dm.enabled|default('0')|tojson }},
     "scan_interval": {{ dm.scan_interval|default('300')|tojson }},
+    "notify_events": {{ dm.notify_events|default('new')|tojson }},
     "email_enabled": {{ dm.email_enabled|default('0')|tojson }},
     "email_to": {{ dm.email_to|default('')|tojson }},
     "email_from": {{ dm.email_from|default('devicemonitor@opnsense.local')|tojson }},

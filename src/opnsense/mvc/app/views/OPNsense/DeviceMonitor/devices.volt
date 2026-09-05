@@ -44,6 +44,14 @@
                 <option value="offline">⚫ Offline</option>
             </select>
 
+            <!-- Rezervace filtr -->
+            <select id="filter-reserved" class="form-control" style="width:auto;min-width:150px;"
+                    title="{{ lang._('A reservation is a DHCP static mapping. An address set manually on the device itself is not visible to the firewall.') }}">
+                <option value="">{{ lang._('All addresses') }}</option>
+                <option value="1">{{ lang._('Reserved (DHCP)') }}</option>
+                <option value="0">{{ lang._('Dynamic') }}</option>
+            </select>
+
             <button id="btn-refresh" class="btn btn-default" title="{{ lang._('Refresh') }}">
                 <i class="fa fa-refresh"></i>
             </button>
@@ -95,10 +103,14 @@ $(document).ready(function() {
         hostname_error: '{{ lang._('Error saving hostname') }}',
         confirm_delete: '{{ lang._('Delete device') }}',
         confirm_clear:  '{{ lang._('Really delete all devices from database?') }}',
-        all_vlans:      '{{ lang._('All VLANs') }}'
+        all_vlans:      '{{ lang._('All VLANs') }}',
+        click_to_rename: '{{ lang._('Click to rename this device') }}',
+        unnamed:        '{{ lang._('unnamed') }}',
+        reserved:       '{{ lang._('RESERVED') }}',
+        reserved_hint:  '{{ lang._('This MAC has a DHCP reservation') }}'
     };
 
-    var allRows = [], activeVlans = [], activeStatus = '', vlanNames = {};
+    var allRows = [], activeVlans = [], activeStatus = '', activeReserved = '', vlanNames = {};
     var sortCol = 'last_seen', sortDir = 'desc';
 
     // Obnov uložený VLAN filtr
@@ -222,7 +234,8 @@ $(document).ready(function() {
         var filtered = allRows.filter(function(r){
             var vo = !activeVlans.length || activeVlans.indexOf(r.vlan) !== -1;
             var so = !activeStatus || r.status === activeStatus;
-            return vo && so;
+            var ro = activeReserved === '' || String(r.is_reserved || 0) === activeReserved;
+            return vo && so && ro;
         });
         // Řazení
         filtered.sort(function(a, b) {
@@ -275,13 +288,19 @@ $(document).ready(function() {
                 : '<span style="color:#666;font-weight:bold;white-space:nowrap;"><i class="fa fa-circle-o"></i> OFFLINE</span>';
 
             var hn = row.hostname || '';
-            var hostnameHtml = '<span class="hostname-display" data-mac="'+row.mac+'" title="Click to edit"'
+            var hostnameHtml = '<span class="hostname-display" data-mac="'+row.mac+'"'
+                +' title="'+translations.click_to_rename+'"'
                 +' style="cursor:pointer;border-bottom:1px dashed #666;">'
-                +(hn||'<em style="color:#555;">\u2014</em>')+'</span>';
+                +(hn||'<em style="color:#555;">'+translations.unnamed+'</em>')
+                +' <i class="fa fa-pencil" style="opacity:.45;font-size:11px;"></i></span>';
 
             var ipHtml = row.ip
                 ? '<a href="http://'+row.ip+'" target="_blank" style="color:#5bc0de;">'+row.ip+'</a>'
                 : '';
+            if (Number(row.is_reserved)) {
+                ipHtml += ' <span class="label label-info" style="font-size:10px;" title="'
+                    + translations.reserved_hint + '">' + translations.reserved + '</span>';
+            }
 
             var vlanLabel = row.vlan||'';
             if (row.vlan && vlanNames[row.vlan]) vlanLabel += ' \u2013 '+vlanNames[row.vlan];
@@ -401,6 +420,7 @@ $(document).ready(function() {
     
     // Toolbar
     $('#filter-status').on('change',function(){ activeStatus=$(this).val(); applyFilters(); });
+    $('#filter-reserved').on('change',function(){ activeReserved=$(this).val(); applyFilters(); });
 
     $('#btn-refresh').on('click',function(){ loadDevices(); loadStats(); });
 
@@ -426,7 +446,8 @@ $(document).ready(function() {
         var filtered = allRows.filter(function(r) {
             var vo = !activeVlans.length || activeVlans.indexOf(r.vlan) !== -1;
             var so = !activeStatus || r.status === activeStatus;
-            return vo && so;
+            var ro = activeReserved === '' || String(r.is_reserved || 0) === activeReserved;
+            return vo && so && ro;
         });
 
         if (!filtered.length) {

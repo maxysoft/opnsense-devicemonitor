@@ -209,6 +209,10 @@ class DeviceMonitor
                     $row['vendor'] = 'Unknown';
                 }
 
+                // The scanner adds is_reserved on every run, but a database
+                // written by an older version has not been through a scan yet.
+                $row['is_reserved'] = isset($row['is_reserved']) ? (int)$row['is_reserved'] : 0;
+
                 // Formátuj datum do českého formátu: 29.12.2025 - 18:37:51
                 if (!empty($row['last_seen'])) {
                     $timestamp = strtotime($row['last_seen']);

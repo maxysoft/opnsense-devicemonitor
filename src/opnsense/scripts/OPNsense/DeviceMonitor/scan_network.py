@@ -133,6 +133,16 @@ def init_db():
     except:
         pass
 
+    try:
+        c.execute('ALTER TABLE devices ADD COLUMN is_reserved INTEGER DEFAULT 0')
+    except:
+        pass
+
+    try:
+        c.execute("ALTER TABLE devices ADD COLUMN pending_event TEXT DEFAULT 'new'")
+    except:
+        pass
+
     # Tombstones for manually deleted devices. Historical Hostwatch records
     # must not immediately recreate a device that the user removed.
     c.execute('''CREATE TABLE IF NOT EXISTS deleted_devices (
@@ -292,6 +302,40 @@ def get_dnsmasq_descriptions():
         log(f"Chyba čtení Dnsmasq config.xml: {e}")
     return descriptions
 
+def get_reserved_macs():
+    """MAC adresy, které mají DHCP rezervaci (ISC staticmap nebo Dnsmasq host).
+
+    Záměrně se nepoužívají mapy popisků: ty přeskakují rezervace bez hostname
+    i descr, které jsou ale pořád rezervace. Firewall vidí jen rezervace, ne
+    adresu nastavenou ručně na samotném zařízení.
+    """
+    reserved = set()
+    try:
+        root = ET.parse('/conf/config.xml').getroot()
+
+        dhcpd = root.find('dhcpd')
+        if dhcpd is not None:
+            for iface in dhcpd:
+                if iface.find('enable') is None:
+                    continue
+                for staticmap in iface.findall('staticmap'):
+                    mac_el = staticmap.find('mac')
+                    if mac_el is not None and mac_el.text:
+                        reserved.add(mac_el.text.lower().strip())
+
+        dnsmasq = root.find('dnsmasq')
+        if dnsmasq is not None:
+            for host in dnsmasq.findall('hosts'):
+                hw_el = host.find('hwaddr')
+                if hw_el is not None and hw_el.text:
+                    reserved.add(hw_el.text.lower().strip())
+
+        log(f"DHCP rezervace: {len(reserved)} MAC adres")
+    except Exception as e:
+        log(f"Chyba čtení rezervací z config.xml: {e}")
+    return reserved
+
+
 def is_recently_seen(last_seen_str, minutes=15):
     """True pokud bylo zařízení viděno v posledních N minutách (porovnání v UTC)"""
     if not last_seen_str:
@@ -304,25 +348,25 @@ def is_recently_seen(last_seen_str, minutes=15):
         return False
     
 
-def send_email_via_php_api(new_devices):
+def send_email_via_php_api(new_devices, event='new'):
     """Označ zařízení v DB pro odeslání emailu"""
     if not new_devices:
         return
-    
+
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
         # Pending must represent exactly this delivery channel's filtered set.
         cursor.execute("UPDATE devices SET notification_pending = 0")
-        
+
         # Označ zařízení pro notifikaci
         for device in new_devices:
             cursor.execute("""
-                UPDATE devices 
-                SET notification_pending = 1 
+                UPDATE devices
+                SET notification_pending = 1, pending_event = ?
                 WHERE mac = ?
-            """, (device['mac'],))
+            """, (event, device['mac']))
         
         conn.commit()
         # log(f"[EMAIL] Marked {len(new_devices)} devices for notification")
@@ -345,25 +389,25 @@ def send_email_via_php_api(new_devices):
         log(f"[EMAIL] Error: {e}")
 
 
-def send_webhook_via_php_api(new_devices):
+def send_webhook_via_php_api(new_devices, event='new'):
     """Označ zařízení v DB pro odeslání webhooku"""
     if not new_devices:
         return
-    
+
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
         # Pending must represent exactly this delivery channel's filtered set.
         cursor.execute("UPDATE devices SET notification_pending = 0")
-        
+
         # Označ zařízení pro notifikaci
         for device in new_devices:
             cursor.execute("""
-                UPDATE devices 
-                SET notification_pending = 1 
+                UPDATE devices
+                SET notification_pending = 1, pending_event = ?
                 WHERE mac = ?
-            """, (device['mac'],))
+            """, (event, device['mac']))
         
         conn.commit()
         # log(f"[WEBHOOK] Marked {len(new_devices)} devices for notification")
@@ -437,11 +481,20 @@ def full_scan():
     dhcp_descriptions = get_dhcp_descriptions()
     dnsmasq_descriptions = get_dnsmasq_descriptions()
     dhcp_descriptions.update(dnsmasq_descriptions)  # Dnsmasq přepíše ISC pokud existuje stejné MAC
+    reserved_macs = get_reserved_macs()
 
     # 3. Aktualizace vlastní DB
     new_devices = []
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = sqlite3.connect(DB_FILE)
+
+    # Stav před skenem, aby šlo poznat přechody online/offline. Musí se načíst
+    # dřív, než se is_active vynuluje.
+    prior_active = {
+        row[0]: (row[1] or 0)
+        for row in conn.execute('SELECT mac, is_active FROM devices')
+    }
+
     conn.execute('UPDATE devices SET is_active = 0, notification_pending = 0')
 
     for device in devices:
@@ -473,23 +526,26 @@ def full_scan():
             'SELECT mac, custom_hostname FROM devices WHERE mac = ?', (mac,)
         ).fetchone()
 
+        is_reserved = 1 if mac in reserved_macs else 0
+        device['is_reserved'] = is_reserved
+
         if row:
             hostname = row[1] if row[1] else device['hostname']
             conn.execute('''
                 UPDATE devices
                 SET ip = ?, hostname = ?, vendor = ?, vlan = ?,
-                    last_seen = ?, is_active = ?
+                    last_seen = ?, is_active = ?, is_reserved = ?
                 WHERE mac = ?
             ''', (device['ip'], hostname, device['vendor'],
-                  device['vlan'], last_seen, is_active, mac))
+                  device['vlan'], last_seen, is_active, is_reserved, mac))
         else:
             conn.execute('''
                 INSERT INTO devices
                     (mac, ip, hostname, vendor, vlan, first_seen, last_seen,
-                     is_active, notification_pending)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                     is_active, notification_pending, is_reserved)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
             ''', (mac, device['ip'], device['hostname'], device['vendor'],
-                  device['vlan'], first_seen, last_seen, is_active))
+                  device['vlan'], first_seen, last_seen, is_active, is_reserved))
             device['first_seen'] = first_seen
             new_devices.append(device)
 
@@ -500,17 +556,52 @@ def full_scan():
     total = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
     conn.close()
 
-    # 4. Notifikace (s filtrováním podle VLAN)
+    # 4. Notifikace (podle zvolených událostí a filtrování podle VLAN)
     log(f"Nová zařízení: {len(new_devices)}, Online: {online}/{total}")
-    if new_devices and config['enabled']:
+    if config['enabled']:
+        wanted = set(
+            e.strip() for e in str(config.get('notify_events', 'new')).split(',') if e.strip()
+        )
+
+        new_macs = {d['mac'] for d in new_devices}
+        events = {'new': new_devices, 'up': [], 'down': []}
+
+        # Přechody se počítají jen pro zařízení, která už v DB byla. Nové
+        # zařízení je "new", ne "up", jinak by se hlásilo dvakrát.
+        for row in conn.execute(
+            'SELECT mac, ip, hostname, vendor, vlan, first_seen, last_seen, is_active FROM devices'
+        ):
+            mac, is_now = row[0], (row[7] or 0)
+            if mac in new_macs or mac not in prior_active:
+                continue
+            was = prior_active[mac]
+            if was == 0 and is_now == 1:
+                bucket = 'up'
+            elif was == 1 and is_now == 0:
+                bucket = 'down'
+            else:
+                continue
+            events[bucket].append({
+                'mac': mac, 'ip': row[1], 'hostname': row[2], 'vendor': row[3],
+                'vlan': row[4], 'first_seen': row[5], 'last_seen': row[6],
+            })
+
         email_vlans   = set(v.strip() for v in config.get('email_vlans',  '').split(',') if v.strip())
         webhook_vlans = set(v.strip() for v in config.get('webhook_vlans', '').split(',') if v.strip())
-        email_devs    = [d for d in new_devices if not email_vlans   or d.get('vlan','') in email_vlans]
-        webhook_devs  = [d for d in new_devices if not webhook_vlans or d.get('vlan','') in webhook_vlans]
-        if email_devs and config.get('email_enabled') and config.get('email_to'):
-            send_email_via_php_api(email_devs)
-        if webhook_devs and config.get('webhook_enabled') and config.get('webhook_url'):
-            send_webhook_via_php_api(webhook_devs)
+
+        for event in ('new', 'up', 'down'):
+            devs = events[event]
+            if not devs or event not in wanted:
+                continue
+            log(f"Událost '{event}': {len(devs)} zařízení")
+
+            email_devs = [d for d in devs if not email_vlans or d.get('vlan', '') in email_vlans]
+            webhook_devs = [d for d in devs if not webhook_vlans or d.get('vlan', '') in webhook_vlans]
+
+            if email_devs and config.get('email_enabled') and config.get('email_to'):
+                send_email_via_php_api(email_devs, event)
+            if webhook_devs and config.get('webhook_enabled') and config.get('webhook_url'):
+                send_webhook_via_php_api(webhook_devs, event)
 
     # Do not leave stale pending flags between scans/channels.
     with sqlite3.connect(DB_FILE) as cleanup_conn:
