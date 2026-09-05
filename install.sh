@@ -87,6 +87,7 @@ mkdir -p /usr/local/opnsense/mvc/app/controllers/OPNsense/DeviceMonitor/Api
 mkdir -p /usr/local/opnsense/mvc/app/views/OPNsense/DeviceMonitor
 mkdir -p /usr/local/opnsense/scripts/OPNsense/DeviceMonitor
 mkdir -p /usr/local/opnsense/service/conf/actions.d
+mkdir -p /usr/local/opnsense/service/templates/OPNsense/DeviceMonitor
 mkdir -p /usr/local/opnsense/www/js/widgets/Metadata
 mkdir -p /usr/local/etc/inc/plugins.inc.d
 mkdir -p /usr/local/etc/rc.d
@@ -226,6 +227,10 @@ cp src/opnsense/service/conf/actions.d/actions_devicemonitor.conf \
    /usr/local/opnsense/service/conf/actions.d/
 echo "  ✓ Configd actions nainstalovány"
 
+cp src/opnsense/service/templates/OPNsense/DeviceMonitor/* \
+   /usr/local/opnsense/service/templates/OPNsense/DeviceMonitor/
+echo "  ✓ Configd šablony nainstalovány"
+
 echo 'devicemonitor_enable="YES"' > /etc/rc.conf.d/devicemonitor
 chmod 644 /etc/rc.conf.d/devicemonitor
 echo "  ✓ Autostart nastaven"
@@ -250,6 +255,11 @@ echo "  → Aktualizuji menu a pluginy..."
 echo "  → Restartuji configd..."
 service configd restart
 sleep 3
+
+# Vyrenderuje config.json a /etc/rc.conf.d/devicemonitor z config.xml
+echo "  → Generuji konfiguraci ze šablon..."
+configctl template reload OPNsense/DeviceMonitor
+chmod 600 /var/db/devicemonitor/config.json 2>/dev/null || true
 
 echo "  → Spouštím daemon..."
 pkill -f monitor_daemon.py 2>/dev/null

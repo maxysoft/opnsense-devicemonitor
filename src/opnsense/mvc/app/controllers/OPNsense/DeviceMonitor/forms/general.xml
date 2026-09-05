@@ -1,0 +1,88 @@
+<form>
+    <field>
+        <id>devicemonitor.general.enabled</id>
+        <label>Enable monitoring</label>
+        <type>checkbox</type>
+        <help>Scan the network periodically and record the devices that are seen.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.scan_interval</id>
+        <label>Scan interval</label>
+        <type>text</type>
+        <help>Seconds between scans, between 60 and 3600.</help>
+    </field>
+
+    <field>
+        <id>devicemonitor.general.email_enabled</id>
+        <label>Enable email notifications</label>
+        <type>checkbox</type>
+    </field>
+    <field>
+        <id>devicemonitor.general.email_to</id>
+        <label>Recipient</label>
+        <type>text</type>
+        <help>Where notifications about new devices are sent.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.email_from</id>
+        <label>Sender</label>
+        <type>text</type>
+    </field>
+    <field>
+        <id>devicemonitor.general.email_method</id>
+        <label>Delivery method</label>
+        <type>dropdown</type>
+        <help>Local Sendmail needs a working local mailer, for example the os-postfix plugin. Direct SMTP talks to a mail server itself and needs nothing else installed.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.smtp_host</id>
+        <label>SMTP server</label>
+        <type>text</type>
+        <help>Only used when the delivery method is Direct SMTP.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.smtp_port</id>
+        <label>SMTP port</label>
+        <type>text</type>
+    </field>
+    <field>
+        <id>devicemonitor.general.smtp_encryption</id>
+        <label>SMTP encryption</label>
+        <type>dropdown</type>
+    </field>
+    <field>
+        <id>devicemonitor.general.smtp_username</id>
+        <label>SMTP username</label>
+        <type>text</type>
+        <help>Leave empty when the server does not require authentication.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.smtp_password</id>
+        <label>SMTP password</label>
+        <type>password</type>
+    </field>
+    <field>
+        <id>devicemonitor.general.email_vlans</id>
+        <label>Email: notify for interfaces</label>
+        <type>text</type>
+        <help>Comma separated interface labels, for example VLAN11,VLAN20. Leave empty to be notified about every interface. Detected labels are listed below the form.</help>
+    </field>
+
+    <field>
+        <id>devicemonitor.general.webhook_enabled</id>
+        <label>Enable webhook notifications</label>
+        <type>checkbox</type>
+    </field>
+    <field>
+        <id>devicemonitor.general.webhook_url</id>
+        <label>Webhook URL</label>
+        <type>text</type>
+        <help>For example https://ntfy.sh/your_topic, a Discord webhook, or your own endpoint.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.webhook_vlans</id>
+        <label>Webhook: notify for interfaces</label>
+        <type>text</type>
+        <help>Comma separated interface labels. Leave empty to be notified about every interface.</help>
+    </field>
+</form>

@@ -1,0 +1,2 @@
+config.json:/var/db/devicemonitor/config.json
+rc.conf.d:/etc/rc.conf.d/devicemonitor

@@ -1,0 +1,17 @@
+{
+    "enabled": {{ OPNsense.DeviceMonitor.general.enabled|default('0')|tojson }},
+    "scan_interval": {{ OPNsense.DeviceMonitor.general.scan_interval|default('300')|tojson }},
+    "email_enabled": {{ OPNsense.DeviceMonitor.general.email_enabled|default('1')|tojson }},
+    "email_to": {{ OPNsense.DeviceMonitor.general.email_to|default('')|tojson }},
+    "email_from": {{ OPNsense.DeviceMonitor.general.email_from|default('devicemonitor@opnsense.local')|tojson }},
+    "email_method": {{ OPNsense.DeviceMonitor.general.email_method|default('sendmail')|tojson }},
+    "smtp_host": {{ OPNsense.DeviceMonitor.general.smtp_host|default('')|tojson }},
+    "smtp_port": {{ OPNsense.DeviceMonitor.general.smtp_port|default('587')|tojson }},
+    "smtp_encryption": {{ OPNsense.DeviceMonitor.general.smtp_encryption|default('starttls')|tojson }},
+    "smtp_username": {{ OPNsense.DeviceMonitor.general.smtp_username|default('')|tojson }},
+    "smtp_password": {{ OPNsense.DeviceMonitor.general.smtp_password|default('')|tojson }},
+    "email_vlans": {{ OPNsense.DeviceMonitor.general.email_vlans|default('')|tojson }},
+    "webhook_enabled": {{ OPNsense.DeviceMonitor.general.webhook_enabled|default('0')|tojson }},
+    "webhook_url": {{ OPNsense.DeviceMonitor.general.webhook_url|default('')|tojson }},
+    "webhook_vlans": {{ OPNsense.DeviceMonitor.general.webhook_vlans|default('')|tojson }}
+}
