@@ -81,7 +81,6 @@ fi
 echo ""
 echo "[3/9] Vytvářím adresářovou strukturu..."
 
-mkdir -p /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Metadata
 mkdir -p /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Menu
 mkdir -p /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/ACL
 mkdir -p /usr/local/opnsense/mvc/app/controllers/OPNsense/DeviceMonitor/Api
@@ -146,15 +145,6 @@ if [ -f "src/opnsense/www/js/widgets/Metadata/DeviceMonitor.xml" ]; then
     echo "  ✓ Widget metadata nainstalována"
 else
     echo "  ✗ VAROVÁNÍ: DeviceMonitor.xml nenalezen!"
-fi
-
-if [ -f "src/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Metadata/service.xml" ]; then
-    cp src/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Metadata/service.xml \
-       /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Metadata/
-    chmod 644 /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Metadata/service.xml
-    echo "  ✓ Service metadata nainstalována"
-else
-    echo "  ✗ VAROVÁNÍ: service.xml nenalezen!"
 fi
 
 # ============================================
