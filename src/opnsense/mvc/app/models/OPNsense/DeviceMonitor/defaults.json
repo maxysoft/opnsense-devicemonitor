@@ -1,5 +1,5 @@
 {
-  "version": "2.3",
+  "version": "2.3.1",
   "paths": {
     "dbFile": "/var/db/devicemonitor/devices.db",
     "configFile": "/var/db/devicemonitor/config.json",
@@ -14,7 +14,7 @@
   },
   "config": {
     "enabled": "0",
-    "email_enabled": "1",
+    "email_enabled": "0",
     "email_to": "",
     "email_from": "devicemonitor@opnsense.local",
     "webhook_enabled": "0",

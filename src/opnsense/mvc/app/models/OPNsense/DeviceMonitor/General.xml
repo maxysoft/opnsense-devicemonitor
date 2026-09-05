@@ -16,8 +16,12 @@
                 <ValidationMessage>The scan interval must be between 60 and 3600 seconds.</ValidationMessage>
             </scan_interval>
 
+            <!-- Off by default. A fresh install has no recipient configured,
+                 and performValidation() requires one once this is on, so
+                 defaulting to 1 would make the model invalid with its own
+                 defaults and abort the initial migration. -->
             <email_enabled type="BooleanField">
-                <Default>1</Default>
+                <Default>0</Default>
                 <Required>Y</Required>
             </email_enabled>
             <email_to type="EmailField">
