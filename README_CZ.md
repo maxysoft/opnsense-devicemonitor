@@ -236,7 +236,30 @@ Také odstraněno rozbité `configctl webgui restart` a `service php-fpm restart
 
 ## Instalace
 
-### Metoda 1: WinSCP + SSH (doporučeno)
+### Metoda 1: Repozitář pluginů (doporučeno)
+
+Nainstaluje Device Monitor jako plnohodnotný OPNsense plugin viditelný v **System → Firmware → Plugins**, aktualizace pak řeší firmware updater.
+
+**Krok 1:** Jednorázově přidej repozitář jako root přes SSH:
+```bash
+fetch -o /usr/local/etc/pkg/repos/mxy-opnsense-repo.conf https://maxysoft.github.io/opnsense-repo/mxy-opnsense-repo.conf
+pkg update
+```
+
+**Krok 2:** Nainstaluj — v GUI v **System → Firmware → Plugins** najdi `os-devicemonitor` a klikni na **+**. Nebo z příkazové řádky:
+```bash
+pkg install os-devicemonitor
+```
+
+Aktualizace: `pkg upgrade os-devicemonitor` nebo **System → Firmware → Updates**. Odinstalace: `pkg remove os-devicemonitor`; databáze zařízení v `/var/db/devicemonitor` zůstane zachována.
+
+> Máš už instalaci přes `install.sh`? Nejdřív spusť `sh uninstall.sh` (databázi zachová) a teprve pak nainstaluj balíček. Jinak zůstanou staré, pkg nespravované kopie souborů, které `pkg remove` neuklidí.
+
+Zdroj repozitáře: [maxysoft/opnsense-repo](https://github.com/maxysoft/opnsense-repo)
+
+---
+
+### Metoda 2: WinSCP + SSH
 
 **Krok 1:** Stáhni nejnovější ZIP z [Release](../../tree/main/release).
 
@@ -259,12 +282,12 @@ Restart není potřeba. Instalační skript se postará o vše.
 
 ---
 
-### Metoda 2: Přímá SSH instalace
+### Metoda 3: Přímá SSH instalace
 
 ```bash
 ssh root@tvoje.opnsense.ip
 cd /tmp
-fetch https://github.com/hacesoft/opnsense-devicemonitor/releases/latest/download/opnsense-devicemonitor.zip
+fetch https://github.com/maxysoft/opnsense-devicemonitor/releases/latest/download/opnsense-devicemonitor.zip
 unzip opnsense-devicemonitor.zip
 cd opnsense-devicemonitor
 sh install.sh
@@ -595,7 +618,7 @@ service configd restart
 
 ## Podpora
 
-**GitHub Issues:** https://github.com/hacesoft/opnsense-devicemonitor/issues
+**GitHub Issues:** https://github.com/maxysoft/opnsense-devicemonitor/issues
 
 **Autor:**
 - GitHub: [@hacesoft](https://github.com/hacesoft)
@@ -605,4 +628,4 @@ service configd restart
 
 ## Licence
 
-MIT License — viz [LICENSE](LICENSE)
+BSD 2-Clause License — viz [LICENSE](LICENSE)

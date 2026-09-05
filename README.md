@@ -236,7 +236,30 @@ Also removed broken `configctl webgui restart` and `service php-fpm restart` cal
 
 ## Installation
 
-### Method 1: WinSCP + SSH (recommended)
+### Method 1: Plugin repository (recommended)
+
+Installs Device Monitor as a real OPNsense plugin, visible under **System → Firmware → Plugins**, with updates handled by the firmware updater.
+
+**Step 1:** Add the repository once, as root over SSH:
+```bash
+fetch -o /usr/local/etc/pkg/repos/mxy-opnsense-repo.conf https://maxysoft.github.io/opnsense-repo/mxy-opnsense-repo.conf
+pkg update
+```
+
+**Step 2:** Install it — in the GUI under **System → Firmware → Plugins**, search for `os-devicemonitor` and press **+**. Or from the shell:
+```bash
+pkg install os-devicemonitor
+```
+
+Update with `pkg upgrade os-devicemonitor` or from **System → Firmware → Updates**. Remove with `pkg remove os-devicemonitor`; the device database in `/var/db/devicemonitor` is kept.
+
+> Already installed via `install.sh`? Run `sh uninstall.sh` first (it preserves the database), then install the package. Otherwise the old, unmanaged copies of the files stay behind and `pkg remove` will not clean them up.
+
+Repository source: [maxysoft/opnsense-repo](https://github.com/maxysoft/opnsense-repo)
+
+---
+
+### Method 2: WinSCP + SSH
 
 **Step 1:** Download the latest release ZIP from [Release](../../tree/main/release).
 
@@ -259,12 +282,12 @@ No reboot required. The install script handles everything.
 
 ---
 
-### Method 2: Direct SSH
+### Method 3: Direct SSH
 
 ```bash
 ssh root@your.opnsense.ip
 cd /tmp
-fetch https://github.com/hacesoft/opnsense-devicemonitor/releases/latest/download/opnsense-devicemonitor.zip
+fetch https://github.com/maxysoft/opnsense-devicemonitor/releases/latest/download/opnsense-devicemonitor.zip
 unzip opnsense-devicemonitor.zip
 cd opnsense-devicemonitor
 sh install.sh
@@ -606,7 +629,7 @@ service configd restart
 
 ## Support
 
-**GitHub Issues:** https://github.com/hacesoft/opnsense-devicemonitor/issues
+**GitHub Issues:** https://github.com/maxysoft/opnsense-devicemonitor/issues
 
 **Author:**
 - GitHub: [@hacesoft](https://github.com/hacesoft)
@@ -616,4 +639,4 @@ service configd restart
 
 ## License
 
-MIT License — see [LICENSE](LICENSE)
+BSD 2-Clause License — see [LICENSE](LICENSE)
