@@ -113,43 +113,11 @@ class DeviceMonitor
     }
 
 
-    /**
-     * Uložení konfigurace
-     * @param array $data Data k uložení
-     * @return bool True pokud se podařilo uložit
-     */
-    public function setConfig($data)
-    {
-        $file_name = self::getPath('configFile');
-        
-        // Bezpečné zajištění adresáře - nesmí blokovat uložení!
-        $dir = dirname($file_name);
-        if (!is_dir($dir)) {
-            try {
-                @mkdir($dir, 0755, true);
-            } catch (\Exception $e) {
-                // Ignoruj chybu - zkusíme uložit soubor i tak
-            }
-        }
-        
-        // Paths are runtime metadata from defaults.json, not user settings.
-        // Do not duplicate them into config.json.
-        unset($data['paths']);
+    // Settings are stored in config.xml through the General model and rendered
+    // into config.json by the configd template, so nothing writes that file
+    // from PHP any more. getConfig() above is the read side, used by the
+    // notification scripts.
 
-        // The config may contain an SMTP password, therefore keep it readable
-        // only by root/system services.
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        $result = @file_put_contents($file_name, $json, LOCK_EX);
-        
-        if ($result !== false) {
-            @chmod($file_name, 0600);
-            return true;
-        }
-        
-        return false;
-    }
-
-    
     // ========================================
     // DATABÁZE
     // ========================================

@@ -8,9 +8,10 @@ class IndexController extends \OPNsense\Base\IndexController
     {
         $this->view->pick('OPNsense/DeviceMonitor/devices');
     }
-    
+
     public function settingsAction()
     {
+        $this->view->generalForm = $this->getForm('general');
         $this->view->pick('OPNsense/DeviceMonitor/settings');
     }
 }

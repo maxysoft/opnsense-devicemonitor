@@ -8,6 +8,23 @@ use OPNsense\Core\Backend;
 class ServiceController extends ApiControllerBase
 {
     /**
+     * Render the configuration files from config.xml and restart the daemon.
+     * Called after the settings form is saved.
+     */
+    public function reconfigureAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['status' => 'failed'];
+        }
+
+        $backend = new Backend();
+        $backend->configdRun('template reload OPNsense/DeviceMonitor');
+        $backend->configdRun('devicemonitor restart');
+
+        return ['status' => 'ok'];
+    }
+
+    /**
      * Spuštění manuálního skenu
      */
     public function scanAction()
