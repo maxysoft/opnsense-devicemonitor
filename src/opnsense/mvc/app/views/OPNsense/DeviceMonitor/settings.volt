@@ -93,7 +93,7 @@ $(document).ready(function () {
                 busy("saveAct", false);
                 notify("{{ lang._('Settings saved and the daemon reloaded.') }}", false);
             });
-        }, true, function () {
+        }, false, function () {
             busy("saveAct", false);
         });
     });
@@ -109,7 +109,7 @@ $(document).ready(function () {
                 notify(ok ? "{{ lang._('Test email sent.') }}"
                           : ((data && data.message) || "{{ lang._('Sending the test email failed.') }}"), !ok);
             });
-        }, true, function () {
+        }, false, function () {
             busy("testEmailAct", false);
         });
     });
@@ -124,7 +124,7 @@ $(document).ready(function () {
                 notify(ok ? "{{ lang._('Test webhook sent.') }}"
                           : ((data && data.message) || "{{ lang._('Sending the test webhook failed.') }}"), !ok);
             });
-        }, true, function () {
+        }, false, function () {
             busy("testWebhookAct", false);
         });
     });

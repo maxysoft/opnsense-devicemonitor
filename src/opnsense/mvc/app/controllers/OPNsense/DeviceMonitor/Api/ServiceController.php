@@ -19,7 +19,12 @@ class ServiceController extends ApiControllerBase
 
         $backend = new Backend();
         $backend->configdRun('template reload OPNsense/DeviceMonitor');
-        $backend->configdRun('devicemonitor restart');
+
+        // configd renders the file with the permissions of its parent
+        // directory, which has to stay traversable for the web UI to read
+        // devices.db. The rendered config.json can hold an SMTP password, so
+        // the configure action tightens it back to 0600 before restarting.
+        $backend->configdRun('devicemonitor configure');
 
         return ['status' => 'ok'];
     }
@@ -45,31 +50,27 @@ class ServiceController extends ApiControllerBase
     {
         $model = new \OPNsense\DeviceMonitor\DeviceMonitor();
         $pidFile = $model->getPidFilePath();
-        
-        if (file_exists($pidFile)) {
-            $pid = trim(file_get_contents($pidFile));
-            
-            // Zkontroluj jestli proces běží
-            exec("ps -p $pid", $output, $return);
-            
-            if ($return === 0) {
-                return [
-                    'result' => 'running',
-                    'pid' => $pid,
-                    'message' => 'Daemon is running'
-                ];
-            } else {
-                return [
-                    'result' => 'stopped',
-                    'message' => 'Daemon is not running (stale pidfile)'
-                ];
-            }
-        } else {
+
+        // Ask configd rather than inspecting the process here: it runs as root,
+        // so its kill -0 check is reliable, and it clears a stale pidfile. It
+        // also keeps an unvalidated pid out of a shell command.
+        $backend = new Backend();
+        $state = trim((string)$backend->configdRun('devicemonitor status'));
+
+        if ($state !== 'running') {
             return [
                 'result' => 'stopped',
                 'message' => 'Daemon is not running'
             ];
         }
+
+        $pid = trim((string)@file_get_contents($pidFile));
+
+        return [
+            'result' => 'running',
+            'pid' => ctype_digit($pid) ? $pid : '',
+            'message' => 'Daemon is running'
+        ];
     }
 
     /**
