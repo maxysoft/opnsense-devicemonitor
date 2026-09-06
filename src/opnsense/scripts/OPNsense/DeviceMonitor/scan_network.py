@@ -545,6 +545,11 @@ def full_scan():
         v.strip() for v in str(config.get('monitor_interfaces', '')).split(',') if v.strip()
     )
 
+    # Zařízení vynechaná filtrem. Jejich řádek zůstane, ale nesmí se z něj
+    # počítat přechod: po zúžení výběru by každé z nich hlásilo "offline",
+    # přestože jen přestalo být sledované.
+    unmonitored = set()
+
     for device in devices:
         mac = device['mac']
         if not mac:
@@ -552,6 +557,7 @@ def full_scan():
 
         # Zařízení z nesledovaného rozhraní se vůbec nezaznamenává.
         if monitor_ifs and device.get('vlan', '') not in monitor_ifs:
+            unmonitored.add(mac)
             continue
 
         # Obohacení o DHCP popis
@@ -606,6 +612,11 @@ def full_scan():
         "SELECT COUNT(*) FROM devices WHERE is_active = 1"
     ).fetchone()[0]
     total = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+
+    # Snímek pro detekci přechodů. Musí se pořídit před zavřením spojení.
+    current_rows = conn.execute(
+        'SELECT mac, ip, hostname, vendor, vlan, first_seen, last_seen, is_active FROM devices'
+    ).fetchall()
     conn.close()
 
     # 4. Notifikace (podle zvolených událostí a filtrování podle VLAN)
@@ -618,11 +629,13 @@ def full_scan():
         new_macs = {d['mac'] for d in new_devices}
         events = {'new': new_devices, 'up': [], 'down': []}
 
+        # Vynechané rozhraní není výpadek zařízení.
+        for mac in unmonitored:
+            prior_active.pop(mac, None)
+
         # Přechody se počítají jen pro zařízení, která už v DB byla. Nové
         # zařízení je "new", ne "up", jinak by se hlásilo dvakrát.
-        for row in conn.execute(
-            'SELECT mac, ip, hostname, vendor, vlan, first_seen, last_seen, is_active FROM devices'
-        ):
+        for row in current_rows:
             mac, is_now = row[0], (row[7] or 0)
             if mac in new_macs or mac not in prior_active:
                 continue
