@@ -34,6 +34,54 @@ class DeviceMonitor
         return isset($paths[$key]) ? $paths[$key] : null;
     }
 
+    private static $interfaceNames = null;
+
+    /**
+     * OPNsense interface key => description. The scanner stores the key
+     * against each device, which is what the filters match on, but "opt2"
+     * means nothing to a reader.
+     */
+    public static function getInterfaceNames()
+    {
+        if (self::$interfaceNames !== null) {
+            return self::$interfaceNames;
+        }
+
+        $names = [];
+        try {
+            $xml = @simplexml_load_file('/conf/config.xml');
+            if ($xml && isset($xml->interfaces)) {
+                foreach ($xml->interfaces->children() as $key => $node) {
+                    if (trim((string)($node->if ?? '')) === '') {
+                        continue;
+                    }
+                    $descr = trim((string)($node->descr ?? ''));
+                    $names[(string)$key] = $descr !== '' ? $descr : strtoupper((string)$key);
+                }
+            }
+        } catch (\Exception $e) {
+            // Without names the key is still shown, which is not fatal.
+        }
+
+        self::$interfaceNames = $names;
+        return $names;
+    }
+
+    /**
+     * Readable label for a stored interface key. Devices on an unassigned
+     * interface keep a generated label instead of a key, so anything unknown
+     * is passed through unchanged.
+     */
+    public static function describeInterface($key)
+    {
+        $key = trim((string)$key);
+        if ($key === '') {
+            return '-';
+        }
+        $names = self::getInterfaceNames();
+        return isset($names[$key]) ? $names[$key] : $key;
+    }
+
     public static function getConfig()
     {
         $data = self::loadDefaults();

@@ -36,25 +36,9 @@ class ConfigController extends ApiControllerBase
      */
     public function getinterfacesAction()
     {
-        $result = [];
-        try {
-            $xml = @simplexml_load_file('/conf/config.xml');
-            if ($xml && isset($xml->interfaces)) {
-                foreach ($xml->interfaces->children() as $ifName => $ifData) {
-                    if (empty(trim((string)($ifData->if ?? '')))) {
-                        continue;
-                    }
-                    $descr = trim((string)($ifData->descr ?? ''));
-                    // Keyed by the OPNsense interface name, which is what the
-                    // scanner stores against each device and what the
-                    // InterfaceField dropdowns submit.
-                    $result[$ifName] = $descr !== '' ? $descr : strtoupper($ifName);
-                }
-            }
-        } catch (\Exception $e) {
-            // an unreadable config.xml just means no suggestions
-        }
-        return $result;
+        // Same map the notifications use, keyed by the OPNsense interface name,
+        // which is what the scanner stores against each device.
+        return \OPNsense\DeviceMonitor\DeviceMonitor::getInterfaceNames();
     }
 
     public function testemailAction()

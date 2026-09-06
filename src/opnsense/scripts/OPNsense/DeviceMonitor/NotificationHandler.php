@@ -291,7 +291,7 @@ HTML;
                         <th style="background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;">Vendor</th>
                         <th style="background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;">IP</th>
                         <th style="background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;">Hostname</th>
-                        <th style="background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;">VLAN</th>
+                        <th style="background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;">Interface</th>
                         <th style="background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase;">First Seen</th>
                     </tr>
                 </thead>
@@ -303,7 +303,7 @@ HTML;
                 $vendor = htmlspecialchars($d['vendor']);
                 $ip = htmlspecialchars($d['ip'] ?? 'No IP');
                 $hostname_val = htmlspecialchars($d['hostname'] ?? 'Unknown');
-                $vlan = htmlspecialchars($d['vlan'] ?? '-');
+                $vlan = htmlspecialchars(\OPNsense\DeviceMonitor\DeviceMonitor::describeInterface($d['vlan'] ?? ''));
                 $first_seen = htmlspecialchars($d['first_seen']);
                 
                 $html .= <<<ROW
@@ -532,7 +532,7 @@ HTML;
                     foreach (array_slice($devices, 0, 10) as $d) {
                         $fields[] = [
                             'name' => $d['mac'],
-                            'value' => "**{$d['vendor']}**\nIP: `{$d['ip']}`\nVLAN: `{$d['vlan']}`",
+                            'value' => "**{$d['vendor']}**\nIP: `{$d['ip']}`\nInterface: `" . \OPNsense\DeviceMonitor\DeviceMonitor::describeInterface($d['vlan'] ?? '') . "`",
                             'inline' => true
                         ];
                     }
