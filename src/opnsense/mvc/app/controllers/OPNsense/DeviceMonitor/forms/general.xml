@@ -6,6 +6,12 @@
         <help>Scan the network periodically and record the devices that are seen.</help>
     </field>
     <field>
+        <id>devicemonitor.general.monitor_interfaces</id>
+        <label>Monitor interfaces</label>
+        <type>select_multiple</type>
+        <help>Only devices seen on these interfaces are recorded. Leave empty to monitor every assigned interface.</help>
+    </field>
+    <field>
         <id>devicemonitor.general.scan_interval</id>
         <label>Scan interval</label>
         <type>text</type>
@@ -68,10 +74,10 @@
         <type>password</type>
     </field>
     <field>
-        <id>devicemonitor.general.email_vlans</id>
+        <id>devicemonitor.general.email_interfaces</id>
         <label>Email: notify for interfaces</label>
-        <type>text</type>
-        <help>Comma separated interface labels, for example VLAN11,VLAN20. Leave empty to be notified about every interface. Detected labels are listed below the form.</help>
+        <type>select_multiple</type>
+        <help>Leave empty to be notified about every interface.</help>
     </field>
 
     <field>
@@ -86,9 +92,9 @@
         <help>For example https://ntfy.sh/your_topic, a Discord webhook, or your own endpoint.</help>
     </field>
     <field>
-        <id>devicemonitor.general.webhook_vlans</id>
+        <id>devicemonitor.general.webhook_interfaces</id>
         <label>Webhook: notify for interfaces</label>
-        <type>text</type>
-        <help>Comma separated interface labels. Leave empty to be notified about every interface.</help>
+        <type>select_multiple</type>
+        <help>Leave empty to be notified about every interface.</help>
     </field>
 </form>

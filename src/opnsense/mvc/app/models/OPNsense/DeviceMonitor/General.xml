@@ -8,6 +8,10 @@
                 <Default>0</Default>
                 <Required>Y</Required>
             </enabled>
+            <!-- Empty means every assigned interface. -->
+            <monitor_interfaces type="InterfaceField">
+                <Multiple>Y</Multiple>
+            </monitor_interfaces>
             <scan_interval type="IntegerField">
                 <Default>300</Default>
                 <Required>Y</Required>
@@ -74,15 +78,11 @@
             </smtp_encryption>
             <smtp_username type="TextField"/>
             <smtp_password type="TextField"/>
-            <!-- Comma separated list of the VLAN labels produced by
-                 scan_network.py (for example VLAN11). Empty means every
-                 interface. Deliberately not an InterfaceField: the device
-                 table stores those generated labels, not OPNsense interface
-                 identifiers, so the two would never match. -->
-            <email_vlans type="TextField">
-                <Mask>/^[0-9A-Za-z_.,-]*$/</Mask>
-                <ValidationMessage>Only interface labels separated by commas are allowed.</ValidationMessage>
-            </email_vlans>
+            <!-- Empty means notify for every interface. The scanner stores the
+                 OPNsense interface key against each device, so these line up. -->
+            <email_interfaces type="InterfaceField">
+                <Multiple>Y</Multiple>
+            </email_interfaces>
 
             <webhook_enabled type="BooleanField">
                 <Default>0</Default>
@@ -91,10 +91,9 @@
             <webhook_url type="UrlField">
                 <ValidationMessage>Please enter a valid URL.</ValidationMessage>
             </webhook_url>
-            <webhook_vlans type="TextField">
-                <Mask>/^[0-9A-Za-z_.,-]*$/</Mask>
-                <ValidationMessage>Only interface labels separated by commas are allowed.</ValidationMessage>
-            </webhook_vlans>
+            <webhook_interfaces type="InterfaceField">
+                <Multiple>Y</Multiple>
+            </webhook_interfaces>
         </general>
     </items>
 </model>

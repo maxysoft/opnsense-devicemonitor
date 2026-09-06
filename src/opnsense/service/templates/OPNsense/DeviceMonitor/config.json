@@ -7,6 +7,7 @@
 {% set dm = ((OPNsense|default({})).get('DeviceMonitor') or {}).get('general') or {} %}
 {
     "enabled": {{ dm.enabled|default('0')|tojson }},
+    "monitor_interfaces": {{ dm.monitor_interfaces|default('')|tojson }},
     "scan_interval": {{ dm.scan_interval|default('300')|tojson }},
     "notify_events": {{ dm.notify_events|default('new')|tojson }},
     "email_enabled": {{ dm.email_enabled|default('0')|tojson }},
@@ -18,8 +19,8 @@
     "smtp_encryption": {{ dm.smtp_encryption|default('starttls')|tojson }},
     "smtp_username": {{ dm.smtp_username|default('')|tojson }},
     "smtp_password": {{ dm.smtp_password|default('')|tojson }},
-    "email_vlans": {{ dm.email_vlans|default('')|tojson }},
+    "email_interfaces": {{ dm.email_interfaces|default('')|tojson }},
     "webhook_enabled": {{ dm.webhook_enabled|default('0')|tojson }},
     "webhook_url": {{ dm.webhook_url|default('')|tojson }},
-    "webhook_vlans": {{ dm.webhook_vlans|default('')|tojson }}
+    "webhook_interfaces": {{ dm.webhook_interfaces|default('')|tojson }}
 }

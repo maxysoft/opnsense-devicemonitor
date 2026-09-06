@@ -29,7 +29,7 @@
                 <button type="button" class="btn btn-default dropdown-toggle"
                         id="vlan-dropdown-toggle" data-toggle="dropdown"
                         style="min-width:160px;text-align:left;">
-                    <span id="vlan-filter-label">{{ lang._('All VLANs') }}</span>
+                    <span id="vlan-filter-label">{{ lang._('All interfaces') }}</span>
                     <span class="caret" style="float:right;margin-top:7px;"></span>
                 </button>
                 <ul class="dropdown-menu" id="vlan-checklist"
@@ -79,7 +79,7 @@
                     <th class="sortable" data-col="ip" style="cursor:pointer;white-space:nowrap;">{{ lang._('IP Address') }} <i class="fa fa-sort"></i></th>
                     <th class="sortable" data-col="hostname" style="cursor:pointer;white-space:nowrap;">{{ lang._('Hostname') }} <i class="fa fa-sort"></i></th>
                     <th class="sortable" data-col="vendor" style="cursor:pointer;white-space:nowrap;">{{ lang._('Vendor') }} <i class="fa fa-sort"></i></th>
-                    <th class="sortable" data-col="vlan" style="cursor:pointer;white-space:nowrap;">{{ lang._('VLAN') }} <i class="fa fa-sort"></i></th>
+                    <th class="sortable" data-col="vlan" style="cursor:pointer;white-space:nowrap;">{{ lang._('Interface') }} <i class="fa fa-sort"></i></th>
                     <th class="sortable" data-col="status" style="cursor:pointer;white-space:nowrap;">{{ lang._('Status') }} <i class="fa fa-sort"></i></th>
                     <th class="sortable" data-col="last_seen" style="cursor:pointer;white-space:nowrap;">{{ lang._('Last Seen') }} <i class="fa fa-sort"></i></th>
                     <th style="white-space:nowrap;">{{ lang._('Actions') }}</th>
@@ -103,7 +103,7 @@ $(document).ready(function() {
         hostname_error: '{{ lang._('Error saving hostname') }}',
         confirm_delete: '{{ lang._('Delete device') }}',
         confirm_clear:  '{{ lang._('Really delete all devices from database?') }}',
-        all_vlans:      '{{ lang._('All VLANs') }}',
+        all_vlans:      '{{ lang._('All interfaces') }}',
         click_to_rename: '{{ lang._('Click to rename this device') }}',
         unnamed:        '{{ lang._('unnamed') }}',
         reserved:       '{{ lang._('RESERVED') }}',

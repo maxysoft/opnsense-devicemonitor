@@ -62,8 +62,10 @@ def load_config():
             'webhook_enabled': DEFAULT_CONFIG.get('webhook_enabled', '0') == '1',
             'webhook_url': DEFAULT_CONFIG.get('webhook_url', ''),
             'scan_interval': int(DEFAULT_CONFIG.get('scan_interval', 300)),
-            'email_vlans': DEFAULT_CONFIG.get('email_vlans', ''),
-            'webhook_vlans': DEFAULT_CONFIG.get('webhook_vlans', ''),
+            'notify_events': DEFAULT_CONFIG.get('notify_events', 'new'),
+            'monitor_interfaces': DEFAULT_CONFIG.get('monitor_interfaces', ''),
+            'email_interfaces': DEFAULT_CONFIG.get('email_interfaces', ''),
+            'webhook_interfaces': DEFAULT_CONFIG.get('webhook_interfaces', ''),
             'apiEmailUrl': PATHS.get('apiEmailUrl', ''),
             'apiWebhookUrl': PATHS.get('apiWebhookUrl', '')
         }
@@ -80,8 +82,10 @@ def load_config():
                 'webhook_enabled': config.get('webhook_enabled', '0') == '1',
                 'webhook_url': config.get('webhook_url', ''),
                 'scan_interval': int(config.get('scan_interval', DEFAULT_CONFIG.get('scan_interval', 300))),
-                'email_vlans': config.get('email_vlans', DEFAULT_CONFIG.get('email_vlans', '')),
-                'webhook_vlans': config.get('webhook_vlans', DEFAULT_CONFIG.get('webhook_vlans', '')),
+                'notify_events': config.get('notify_events', DEFAULT_CONFIG.get('notify_events', 'new')),
+                'monitor_interfaces': config.get('monitor_interfaces', DEFAULT_CONFIG.get('monitor_interfaces', '')),
+                'email_interfaces': config.get('email_interfaces', DEFAULT_CONFIG.get('email_interfaces', '')),
+                'webhook_interfaces': config.get('webhook_interfaces', DEFAULT_CONFIG.get('webhook_interfaces', '')),
                 'apiEmailUrl': PATHS.get('apiEmailUrl', ''),
                 'apiWebhookUrl': PATHS.get('apiWebhookUrl', '')
             }
@@ -96,8 +100,10 @@ def load_config():
             'webhook_enabled': False,
             'webhook_url': '',
             'scan_interval': 300,
-            'email_vlans':  '',
-            'webhook_vlans': '',
+            'notify_events': 'new',
+            'monitor_interfaces': '',
+            'email_interfaces':  '',
+            'webhook_interfaces': '',
             'apiEmailUrl': PATHS.get('apiEmailUrl'),
             'apiWebhookUrl': PATHS.get('apiWebhookUrl')
         }
@@ -229,8 +235,45 @@ def get_hostwatch_devices():
     return devices
 
 
+_INTERFACE_MAP = None
+
+
+def get_interface_map():
+    """Fyzické zařízení (vlan0.11, igc0) -> klíč rozhraní v OPNsense (lan, opt2).
+
+    Ukládá se klíč, ne vygenerovaný popisek, aby se dal ve filtrech použít
+    InterfaceField: ten nabízí přesně tyto klíče.
+    """
+    global _INTERFACE_MAP
+    if _INTERFACE_MAP is not None:
+        return _INTERFACE_MAP
+
+    mapping = {}
+    try:
+        root = ET.parse('/conf/config.xml').getroot()
+        interfaces = root.find('interfaces')
+        if interfaces is not None:
+            for iface in interfaces:
+                if_el = iface.find('if')
+                if if_el is not None and if_el.text:
+                    mapping[if_el.text.strip()] = iface.tag
+        log(f"Rozhraní: {len(mapping)} přiřazení")
+    except Exception as e:
+        log(f"Chyba čtení rozhraní z config.xml: {e}")
+
+    _INTERFACE_MAP = mapping
+    return mapping
+
+
 def map_interface_to_vlan(interface_name):
-    """Převede interface_name (vlan0.11) na čitelný název (VLAN11)"""
+    """Fyzické zařízení -> klíč rozhraní, s fallbackem na starý popisek.
+
+    Nepřiřazené rozhraní žádný klíč nemá, takže zařízení na něm si nechá
+    původní podobu (VLAN11 / IGC0) a nezmizí ze seznamu.
+    """
+    assigned = get_interface_map().get((interface_name or '').strip())
+    if assigned:
+        return assigned
     if not interface_name:
         return 'Unknown'
     
@@ -497,9 +540,18 @@ def full_scan():
 
     conn.execute('UPDATE devices SET is_active = 0, notification_pending = 0')
 
+    # Prázdný výběr = sleduj všechna přiřazená rozhraní.
+    monitor_ifs = set(
+        v.strip() for v in str(config.get('monitor_interfaces', '')).split(',') if v.strip()
+    )
+
     for device in devices:
         mac = device['mac']
         if not mac:
+            continue
+
+        # Zařízení z nesledovaného rozhraní se vůbec nezaznamenává.
+        if monitor_ifs and device.get('vlan', '') not in monitor_ifs:
             continue
 
         # Obohacení o DHCP popis
@@ -586,8 +638,8 @@ def full_scan():
                 'vlan': row[4], 'first_seen': row[5], 'last_seen': row[6],
             })
 
-        email_vlans   = set(v.strip() for v in config.get('email_vlans',  '').split(',') if v.strip())
-        webhook_vlans = set(v.strip() for v in config.get('webhook_vlans', '').split(',') if v.strip())
+        email_ifs   = set(v.strip() for v in config.get('email_interfaces',  '').split(',') if v.strip())
+        webhook_ifs = set(v.strip() for v in config.get('webhook_interfaces', '').split(',') if v.strip())
 
         for event in ('new', 'up', 'down'):
             devs = events[event]
@@ -595,8 +647,8 @@ def full_scan():
                 continue
             log(f"Událost '{event}': {len(devs)} zařízení")
 
-            email_devs = [d for d in devs if not email_vlans or d.get('vlan', '') in email_vlans]
-            webhook_devs = [d for d in devs if not webhook_vlans or d.get('vlan', '') in webhook_vlans]
+            email_devs = [d for d in devs if not email_ifs or d.get('vlan', '') in email_ifs]
+            webhook_devs = [d for d in devs if not webhook_ifs or d.get('vlan', '') in webhook_ifs]
 
             if email_devs and config.get('email_enabled') and config.get('email_to'):
                 send_email_via_php_api(email_devs, event)

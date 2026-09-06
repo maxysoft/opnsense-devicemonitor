@@ -6,6 +6,12 @@
 
 Plugin pro automatické sledování síťových zařízení v OPNsense firewallu. Detekuje nová zařízení pomocí nativní OPNsense hostwatch databáze a odesílá emailová nebo webhook upozornění.
 
+> **Upozornění k AI.** Části tohoto forku, včetně balíčkování a některých funkcí,
+> vznikly s pomocí AI a před vydáním je zkontroloval člověk. Běží to na
+> firewallu, takže k tomu přistupuj jako ke každému pluginu třetí strany:
+> přečti si kód, otestuj to tam, kde si můžeš dovolit něco rozbít, a nahlas
+> cokoli, co vypadá špatně.
+
 ---
 
 ## 📋 Obsah

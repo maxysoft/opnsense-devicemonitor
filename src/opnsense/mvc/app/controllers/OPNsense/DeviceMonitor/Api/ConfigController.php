@@ -41,20 +41,14 @@ class ConfigController extends ApiControllerBase
             $xml = @simplexml_load_file('/conf/config.xml');
             if ($xml && isset($xml->interfaces)) {
                 foreach ($xml->interfaces->children() as $ifName => $ifData) {
-                    $iface = trim((string)($ifData->if ?? ''));
-                    $descr = trim((string)($ifData->descr ?? ''));
-                    if (empty($iface)) {
+                    if (empty(trim((string)($ifData->if ?? '')))) {
                         continue;
                     }
-                    if (empty($descr)) {
-                        $descr = strtoupper($ifName);
-                    }
-                    if (preg_match('/vlan\d+\.(\d+)/i', $iface, $m)) {
-                        $key = 'VLAN' . $m[1];
-                    } else {
-                        $key = strtoupper($iface);
-                    }
-                    $result[$key] = $descr;
+                    $descr = trim((string)($ifData->descr ?? ''));
+                    // Keyed by the OPNsense interface name, which is what the
+                    // scanner stores against each device and what the
+                    // InterfaceField dropdowns submit.
+                    $result[$ifName] = $descr !== '' ? $descr : strtoupper($ifName);
                 }
             }
         } catch (\Exception $e) {

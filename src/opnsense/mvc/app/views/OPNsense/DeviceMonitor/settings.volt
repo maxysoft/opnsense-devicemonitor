@@ -13,10 +13,6 @@
             {{ partial("layout_partials/base_form",['fields':generalForm,'id':'frm_GeneralSettings']) }}
         </div>
 
-        <div class="col-md-12">
-            <p class="text-muted" id="detected-interfaces"></p>
-        </div>
-
         <div class="col-md-12" style="padding-bottom:15px;">
             <button class="btn btn-primary" id="saveAct" type="button">
                 <b>{{ lang._('Save') }}</b>
@@ -75,16 +71,6 @@ $(document).ready(function () {
         $("#settings-version").text("v" + (data.version || "?"));
     });
 
-    // The notification filters match the labels the scanner writes to the
-    // device table, so show which ones this firewall can actually produce.
-    $.getJSON("/api/devicemonitor/config/getinterfaces", function (data) {
-        var labels = Object.keys(data || {}).sort();
-        if (labels.length) {
-            $("#detected-interfaces").text(
-                "{{ lang._('Interface labels detected on this system:') }} " + labels.join(", ")
-            );
-        }
-    });
 
     $("#saveAct").click(function () {
         busy("saveAct", true);

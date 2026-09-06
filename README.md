@@ -6,6 +6,12 @@
 
 Plugin for automatic network device monitoring in OPNsense firewall. Detects new devices on the network using the native OPNsense hostwatch database and sends email or webhook notifications.
 
+> **AI disclaimer.** Parts of this fork, including the packaging and some
+> features, were written with AI assistance and reviewed by a human before
+> release. It runs on a firewall, so treat it as you would any third-party
+> plugin: read the code, test it somewhere you can afford to break, and report
+> anything that looks wrong.
+
 ---
 
 ## 📋 Table of Contents
