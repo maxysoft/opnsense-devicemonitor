@@ -107,7 +107,9 @@ $(document).ready(function() {
         click_to_rename: '{{ lang._('Click to rename this device') }}',
         unnamed:        '{{ lang._('unnamed') }}',
         reserved:       '{{ lang._('RESERVED') }}',
-        reserved_hint:  '{{ lang._('This MAC has a DHCP reservation') }}'
+        reserved_hint:  '{{ lang._('This MAC has a DHCP reservation') }}',
+        no_devices:     '{{ lang._('No devices recorded yet. They appear after the next scan.') }}',
+        none_match:     '{{ lang._('No devices match the current filters.') }}'
     };
 
     var allRows = [], activeVlans = [], activeStatus = '', activeReserved = '', vlanNames = {};
@@ -230,7 +232,10 @@ $(document).ready(function() {
 
     // Filtrování
     function applyFilters() {
-        if (!allRows || !allRows.length) return;
+        // No early return on an empty set: clearing the database, deleting the
+        // last device or filtering everything out all have to reach
+        // renderTable(), otherwise the table keeps showing what was there.
+        allRows = allRows || [];
         var filtered = allRows.filter(function(r){
             var vo = !activeVlans.length || activeVlans.indexOf(r.vlan) !== -1;
             var so = !activeStatus || r.status === activeStatus;
@@ -282,6 +287,13 @@ $(document).ready(function() {
     // Render tabulky
     function renderTable(rows) {
         var $tbody = $('#grid-devices tbody').empty();
+        if (!rows.length) {
+            $('<tr>').append(
+                $('<td colspan="8">').css({'text-align':'center','padding':'24px','color':'#888'})
+                    .text(allRows.length ? translations.none_match : translations.no_devices)
+            ).appendTo($tbody);
+            return;
+        }
         rows.forEach(function(row) {
             var statusHtml = row.status==='online'
                 ? '<span style="color:#4CAF50;font-weight:bold;white-space:nowrap;"><i class="fa fa-circle"></i> ONLINE</span>'

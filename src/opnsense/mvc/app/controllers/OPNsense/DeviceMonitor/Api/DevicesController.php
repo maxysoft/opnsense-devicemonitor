@@ -294,8 +294,11 @@ class DevicesController extends ApiControllerBase
     {
         if ($this->request->isPost()) {
             $model = new DeviceMonitor();
-            $model->clearAll();
-            return ['result' => 'cleared'];
+            // Report what actually happened. Discarding this made a failed
+            // clear indistinguishable from a successful one.
+            if ($model->clearAll()) {
+                return ['result' => 'cleared'];
+            }
         }
 
         return ['result' => 'failed'];
