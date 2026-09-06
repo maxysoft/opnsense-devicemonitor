@@ -559,7 +559,7 @@ HTML;
                 } else {
                     // GENERIC REAL
                     $payload = [
-                        'event' => 'new_devices',
+                        'event' => $event,
                         'hostname' => $hostname,
                         'timestamp' => date('Y-m-d H:i:s'),
                         'device_count' => $count,

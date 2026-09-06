@@ -149,6 +149,13 @@ def init_db():
     except:
         pass
 
+    # Only full_scan() writes this. is_active is also written by the GUI
+    # ("Check online"), which would otherwise look like an up/down transition.
+    try:
+        c.execute('ALTER TABLE devices ADD COLUMN scan_active INTEGER DEFAULT 0')
+    except:
+        pass
+
     # Tombstones for manually deleted devices. Historical Hostwatch records
     # must not immediately recreate a device that the user removed.
     c.execute('''CREATE TABLE IF NOT EXISTS deleted_devices (
@@ -373,6 +380,14 @@ def get_reserved_macs():
                 if hw_el is not None and hw_el.text:
                     reserved.add(hw_el.text.lower().strip())
 
+        # Kea je na 26.x plnohodnotný DHCP server, rezervace jsou jinde.
+        for path in ('OPNsense/Kea/dhcp4/reservations/reservation',
+                     'OPNsense/Kea/dhcp6/reservations/reservation'):
+            for res in root.findall(path):
+                hw_el = res.find('hw_address')
+                if hw_el is not None and hw_el.text:
+                    reserved.add(hw_el.text.lower().strip())
+
         log(f"DHCP rezervace: {len(reserved)} MAC adres")
     except Exception as e:
         log(f"Chyba čtení rezervací z config.xml: {e}")
@@ -535,20 +550,15 @@ def full_scan():
     # dřív, než se is_active vynuluje.
     prior_active = {
         row[0]: (row[1] or 0)
-        for row in conn.execute('SELECT mac, is_active FROM devices')
+        for row in conn.execute('SELECT mac, scan_active FROM devices')
     }
 
-    conn.execute('UPDATE devices SET is_active = 0, notification_pending = 0')
+    conn.execute('UPDATE devices SET is_active = 0, scan_active = 0, notification_pending = 0')
 
     # Prázdný výběr = sleduj všechna přiřazená rozhraní.
     monitor_ifs = set(
         v.strip() for v in str(config.get('monitor_interfaces', '')).split(',') if v.strip()
     )
-
-    # Zařízení vynechaná filtrem. Jejich řádek zůstane, ale nesmí se z něj
-    # počítat přechod: po zúžení výběru by každé z nich hlásilo "offline",
-    # přestože jen přestalo být sledované.
-    unmonitored = set()
 
     for device in devices:
         mac = device['mac']
@@ -557,7 +567,6 @@ def full_scan():
 
         # Zařízení z nesledovaného rozhraní se vůbec nezaznamenává.
         if monitor_ifs and device.get('vlan', '') not in monitor_ifs:
-            unmonitored.add(mac)
             continue
 
         # Obohacení o DHCP popis
@@ -592,18 +601,18 @@ def full_scan():
             conn.execute('''
                 UPDATE devices
                 SET ip = ?, hostname = ?, vendor = ?, vlan = ?,
-                    last_seen = ?, is_active = ?, is_reserved = ?
+                    last_seen = ?, is_active = ?, scan_active = ?, is_reserved = ?
                 WHERE mac = ?
             ''', (device['ip'], hostname, device['vendor'],
-                  device['vlan'], last_seen, is_active, is_reserved, mac))
+                  device['vlan'], last_seen, is_active, is_active, is_reserved, mac))
         else:
             conn.execute('''
                 INSERT INTO devices
                     (mac, ip, hostname, vendor, vlan, first_seen, last_seen,
-                     is_active, notification_pending, is_reserved)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                     is_active, scan_active, notification_pending, is_reserved)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
             ''', (mac, device['ip'], device['hostname'], device['vendor'],
-                  device['vlan'], first_seen, last_seen, is_active, is_reserved))
+                  device['vlan'], first_seen, last_seen, is_active, is_active, is_reserved))
             device['first_seen'] = first_seen
             new_devices.append(device)
 
@@ -615,7 +624,7 @@ def full_scan():
 
     # Snímek pro detekci přechodů. Musí se pořídit před zavřením spojení.
     current_rows = conn.execute(
-        'SELECT mac, ip, hostname, vendor, vlan, first_seen, last_seen, is_active FROM devices'
+        'SELECT mac, ip, hostname, vendor, vlan, first_seen, last_seen, scan_active FROM devices'
     ).fetchall()
     conn.close()
 
@@ -629,15 +638,16 @@ def full_scan():
         new_macs = {d['mac'] for d in new_devices}
         events = {'new': new_devices, 'up': [], 'down': []}
 
-        # Vynechané rozhraní není výpadek zařízení.
-        for mac in unmonitored:
-            prior_active.pop(mac, None)
-
         # Přechody se počítají jen pro zařízení, která už v DB byla. Nové
         # zařízení je "new", ne "up", jinak by se hlásilo dvakrát.
         for row in current_rows:
             mac, is_now = row[0], (row[7] or 0)
             if mac in new_macs or mac not in prior_active:
+                continue
+            # Nesledované rozhraní není výpadek. Řídí se podle rozhraní na
+            # řádku, ne podle toho, co tento sken přeskočil: zařízení, které
+            # mezitím vypadlo z hostwatch, by se jinak ohlásilo jako offline.
+            if monitor_ifs and (row[4] or '') not in monitor_ifs:
                 continue
             was = prior_active[mac]
             if was == 0 and is_now == 1:

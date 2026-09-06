@@ -157,6 +157,21 @@ def main():
         rows = sqlite3.connect(os.path.join(workdir, 'devices.db')).execute(
             'SELECT mac FROM devices ORDER BY mac').fetchall()
         check('rows survive the filter', [r[0] for r in rows], ['aa:11', 'bb:22'])
+
+        # A de-selected device that also ages out of hostwatch must stay silent.
+        # Tracking only what this scan skipped missed exactly this case.
+        hosts[:] = [device('aa:11')]
+        check('de-selected row aging out is silent', scan(), [])
+
+        # The GUI writes is_active when "Check online" is used. Transitions read
+        # a scanner-owned column so that cannot look like an outage or a return.
+        config['monitor_interfaces'] = ''
+        hosts[:] = [device('aa:11'), device('bb:22', 'vlan0.11')]
+        scan()
+        db = sqlite3.connect(os.path.join(workdir, 'devices.db'))
+        db.execute("UPDATE devices SET is_active = 0 WHERE mac = 'aa:11'")
+        db.commit(); db.close()
+        check('GUI ping does not fake a transition', scan(), [])
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

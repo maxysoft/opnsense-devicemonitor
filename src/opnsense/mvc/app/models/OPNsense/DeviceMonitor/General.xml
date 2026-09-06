@@ -20,13 +20,9 @@
                 <ValidationMessage>The scan interval must be between 60 and 3600 seconds.</ValidationMessage>
             </scan_interval>
 
-            <!-- Off by default. A fresh install has no recipient configured,
-                 and performValidation() requires one once this is on, so
-                 defaulting to 1 would make the model invalid with its own
-                 defaults and abort the initial migration. -->
             <!-- Which events raise a notification. Applies to both channels.
-                 Clearing it disables notifications without turning the
-                 channels off. -->
+                 Required, so at least one event is always selected; turn a
+                 channel off to stop its notifications. -->
             <notify_events type="OptionField">
                 <Default>new</Default>
                 <Required>Y</Required>
@@ -38,6 +34,10 @@
                 </OptionValues>
             </notify_events>
 
+            <!-- Off by default. A fresh install has no recipient configured,
+                 and performValidation() requires one once this is on, so
+                 defaulting to 1 would make the model invalid with its own
+                 defaults and abort the initial migration. -->
             <email_enabled type="BooleanField">
                 <Default>0</Default>
                 <Required>Y</Required>
