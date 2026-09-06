@@ -17,7 +17,8 @@ echo "[1/9] Provádím kontroly..."
 }
 echo "  ✓ Root oprávnění OK"
 
-PLUGIN_VER=$(python3 -c "import json; print(json.load(open('src/opnsense/mvc/app/models/OPNsense/DeviceMonitor/defaults.json'))['version'])" 2>/dev/null || echo "?")
+# Verze je jediná v packaging Makefile a v git tagu, tady se jen zobrazuje.
+PLUGIN_VER=$(git describe --tags --always 2>/dev/null || echo "ze zdrojáků")
 echo "  ✓ Verze pluginu: Device Monitor v${PLUGIN_VER}"
 
 OPNSENSE_VER=$(opnsense-version 2>/dev/null | awk '{print $2}')
