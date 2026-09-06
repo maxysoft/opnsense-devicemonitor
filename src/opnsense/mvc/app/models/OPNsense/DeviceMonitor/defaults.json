@@ -1,0 +1,34 @@
+{
+  "version": "2.5.0",
+  "paths": {
+    "dbFile": "/var/db/devicemonitor/devices.db",
+    "configFile": "/var/db/devicemonitor/config.json",
+    "pidFile": "/var/run/devicemonitor.pid",
+    "hostwatchDb": "/var/db/hostwatch/hosts.db",
+    "scanScript": "/usr/local/opnsense/scripts/OPNsense/DeviceMonitor/scan_network.py",
+    "daemonScript": "/usr/local/opnsense/scripts/OPNsense/DeviceMonitor/monitor_daemon.py",
+    "configController": "/usr/local/opnsense/mvc/app/controllers/OPNsense/DeviceMonitor",
+    "apiBaseUrl": "https://localhost/api/devicemonitor",
+    "apiEmailUrl": "https://localhost/api/devicemonitor/config/sendEmail",
+    "apiWebhookUrl": "https://localhost/api/devicemonitor/config/sendWebhook"
+  },
+  "config": {
+    "enabled": "0",
+    "email_enabled": "0",
+    "notify_events": "new",
+    "monitor_interfaces": "",
+    "email_to": "",
+    "email_from": "devicemonitor@opnsense.local",
+    "webhook_enabled": "0",
+    "webhook_url": "",
+    "email_interfaces": "",
+    "webhook_interfaces": "",
+    "scan_interval": "300",
+    "email_method": "sendmail",
+    "smtp_host": "",
+    "smtp_port": "587",
+    "smtp_encryption": "starttls",
+    "smtp_username": "",
+    "smtp_password": ""
+  }
+}
