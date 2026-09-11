@@ -22,6 +22,8 @@
     "smtp_password": {{ dm.smtp_password|default('')|tojson }},
     "email_interfaces": {{ dm.email_interfaces|default('')|tojson }},
     "webhook_enabled": {{ dm.webhook_enabled|default('0')|tojson }},
+    "webhook_type": {{ dm.webhook_type|default('auto')|tojson }},
+    "webhook_insecure": {{ dm.webhook_insecure|default('0')|tojson }},
     "webhook_url": {{ dm.webhook_url|default('')|tojson }},
     "webhook_interfaces": {{ dm.webhook_interfaces|default('')|tojson }}
 }

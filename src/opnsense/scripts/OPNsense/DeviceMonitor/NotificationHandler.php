@@ -62,17 +62,34 @@ class NotificationHandler
         if (!is_array($parts) || empty($parts['host'])) {
             return '(unparseable)';
         }
-        $path = $parts['path'] ?? '';
-        if (strlen($path) > 16) {
-            $path = substr($path, 0, 16) . '...';
-        }
-        return ($parts['scheme'] ?? '') . '://' . $parts['host'] . $path;
+        // Host only. For ntfy the path is the topic, which is the credential.
+        return ($parts['scheme'] ?? '') . '://' . $parts['host'];
     }
 
     /**
-     * HTTP header values are ASCII. An emoji in a title makes an HTTP/2 server
-     * reset the stream with PROTOCOL_ERROR, which is what broke ntfy delivery.
-     * ntfy documents RFC 2047 for this, so encode only when necessary.
+     * Verify TLS unless the user opted out for a self-signed endpoint, and
+     * allow only HTTP(S). UrlField accepts gopher:// and dict://, which would
+     * turn the Test button into an SSRF tool aimed at the firewall's own LAN.
+     */
+    private static function secureCurl($ch)
+    {
+        $insecure = false;
+        try {
+            $config = \OPNsense\DeviceMonitor\DeviceMonitor::getConfig();
+            $insecure = !empty($config['webhook_insecure']) && (string)$config['webhook_insecure'] === '1';
+        } catch (\Throwable $e) {
+            // Unreadable config means verify, never the other way round.
+        }
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, !$insecure);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $insecure ? 0 : 2);
+        curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    }
+
+    /**
+     * HTTP header values are ASCII. ntfy documents RFC 2047 for anything else,
+     * so encode only when necessary. Note: this was NOT the cause of the
+     * PROTOCOL_ERROR once blamed on it, which was a server-side routing fault.
      */
     private static function headerValue($value)
     {
@@ -91,7 +108,7 @@ class NotificationHandler
             return '';
         }
         $body = preg_replace('/\s+/', ' ', $body);
-        return strlen($body) > $max ? substr($body, 0, $max) . '...' : $body;
+        return strlen($body) > $max ? mb_strcut($body, 0, $max, 'UTF-8') . '...' : $body;
     }
 
     
@@ -108,8 +125,13 @@ class NotificationHandler
         
         try {
             $db = new \SQLite3($db_file, SQLITE3_OPEN_READONLY);
+            $db->busyTimeout(2000);
             $result = $db->query("SELECT * FROM devices WHERE notification_pending = 1 ORDER BY first_seen DESC");
-            
+            if ($result === false) {
+                $db->close();
+                return null;
+            }
+
             $devices = [];
             while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
                 $devices[] = $row;
@@ -117,8 +139,8 @@ class NotificationHandler
             
             $db->close();
             return $devices;
-            
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return null;
         }
     }
@@ -482,12 +504,29 @@ HTML;
         }
 
         // DETEKCE TYPU WEBHOOKU
-        $type = 'generic';
-        if (stripos($webhook_url, 'ntfy') !== false) {
-            $type = 'ntfy';
-        } elseif (stripos($webhook_url, 'discord') !== false) {
-            $type = 'discord';
+        // Sniffing the URL guesses wrong both ways: a self-hosted ntfy on a
+        // host without "ntfy" in the name silently got the generic JSON body,
+        // and a generic endpoint with "discord" anywhere in its path got a
+        // Discord embed. The setting wins; sniffing is only the fallback.
+        $type = null;
+        try {
+            $cfg = \OPNsense\DeviceMonitor\DeviceMonitor::getConfig();
+            $configured = strtolower((string)($cfg['webhook_type'] ?? 'auto'));
+            if (in_array($configured, ['generic', 'ntfy', 'discord'], true)) {
+                $type = $configured;
+            }
+        } catch (\Throwable $e) {
+            // fall through to sniffing
         }
+        if ($type === null) {
+            $type = 'generic';
+            if (stripos($webhook_url, 'ntfy') !== false) {
+                $type = 'ntfy';
+            } elseif (stripos($webhook_url, 'discord') !== false) {
+                $type = 'discord';
+            }
+        }
+        $this->fLog("webhook type resolved to {$type}", 'WEBHOOK', 'DEBUG');
         
         try {
             if ($is_test) {
@@ -505,7 +544,7 @@ HTML;
                     ]);
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    self::secureCurl($ch);
                     
                 } elseif ($type === 'discord') {
                     // DISCORD TEST
@@ -534,7 +573,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    self::secureCurl($ch);
                     
                 } else {
                     // GENERIC TEST
@@ -553,7 +592,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    self::secureCurl($ch);
                 }
                 
             } else {
@@ -609,7 +648,7 @@ HTML;
                     ]);
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    self::secureCurl($ch);
                     
                 } elseif ($type === 'discord') {
                     // DISCORD REAL
@@ -639,7 +678,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    self::secureCurl($ch);
                     
                 } else {
                     // GENERIC REAL
@@ -657,7 +696,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    self::secureCurl($ch);
                 }
             }
             
@@ -677,7 +716,6 @@ HTML;
                 $curl_errno,
                 self::redactUrl($effective_url)
             ), 'WEBHOOK', 'DEBUG');
-            $this->fLog('webhook response body: ' . self::snippet($response), 'WEBHOOK', 'DEBUG');
 
             if ($http_code >= 200 && $http_code < 300) {
                 return [

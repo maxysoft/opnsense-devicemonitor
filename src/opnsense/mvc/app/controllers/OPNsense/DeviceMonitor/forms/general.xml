@@ -92,6 +92,18 @@
         <type>checkbox</type>
     </field>
     <field>
+        <id>devicemonitor.general.webhook_type</id>
+        <label>Webhook type</label>
+        <type>dropdown</type>
+        <help>Picks the payload format. Detect from the URL looks for "ntfy" or "discord" in it, which is wrong for a self-hosted ntfy on another hostname, so set it explicitly if delivery arrives as raw JSON.</help>
+    </field>
+    <field>
+        <id>devicemonitor.general.webhook_insecure</id>
+        <label>Skip TLS verification</label>
+        <type>checkbox</type>
+        <help>Only for an endpoint with a self-signed certificate. A webhook URL normally contains the credential, so leaving this off keeps it from anyone able to intercept the connection.</help>
+    </field>
+    <field>
         <id>devicemonitor.general.webhook_url</id>
         <label>Webhook URL</label>
         <type>text</type>

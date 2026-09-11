@@ -98,6 +98,25 @@
                 <Default>0</Default>
                 <Required>Y</Required>
             </webhook_enabled>
+            <!-- Explicit beats guessing from the URL, which got both a
+                 self-hosted ntfy and a generic endpoint wrong. -->
+            <webhook_type type="OptionField">
+                <Default>auto</Default>
+                <Required>Y</Required>
+                <OptionValues>
+                    <auto>Detect from the URL</auto>
+                    <generic>Generic JSON</generic>
+                    <ntfy>ntfy</ntfy>
+                    <discord>Discord</discord>
+                </OptionValues>
+            </webhook_type>
+            <!-- Only for a self-signed endpoint. The URL of a webhook is
+                 usually itself the credential, so skipping verification
+                 exposes it to anyone on the path. -->
+            <webhook_insecure type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </webhook_insecure>
             <webhook_url type="UrlField">
                 <ValidationMessage>Please enter a valid URL.</ValidationMessage>
             </webhook_url>

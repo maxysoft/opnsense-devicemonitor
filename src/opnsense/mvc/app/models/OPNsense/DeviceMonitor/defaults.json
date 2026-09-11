@@ -20,6 +20,8 @@
     "email_to": "",
     "email_from": "devicemonitor@opnsense.local",
     "webhook_enabled": "0",
+    "webhook_type": "auto",
+    "webhook_insecure": "0",
     "webhook_url": "",
     "email_interfaces": "",
     "webhook_interfaces": "",

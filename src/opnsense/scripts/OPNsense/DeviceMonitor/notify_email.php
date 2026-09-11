@@ -19,4 +19,6 @@ $handler->fLog($logMessage, "NOTIFY_EMAIL.php");
 
 // V CLI scriptu MUSÍ být echo + exit!
 echo json_encode($result);
-exit($result['result'] === 'sent' ? 0 : 1);
+// Always exit 0: configd's script_output replaces the payload with
+// "Execute error" on a non-zero exit, discarding the JSON verdict.
+exit(0);

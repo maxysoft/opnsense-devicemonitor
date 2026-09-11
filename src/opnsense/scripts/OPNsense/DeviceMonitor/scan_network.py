@@ -9,6 +9,7 @@ import argparse
 import subprocess
 import re
 import xml.etree.ElementTree as ET
+import fcntl
 
 # ================================================================
 # KONFIGURACE - ZAPNI/VYPNI FUNKCE
@@ -695,6 +696,25 @@ def full_scan():
     return 0
 
 
+def acquire_scan_lock():
+    """Jediný sken v jednu chvíli.
+
+    Tlačítko v GUI a daemon spouštějí tentýž skript a sdílejí sloupec
+    notification_pending. Paralelní sken příznak druhému smaže mezi zápisem
+    a čtením v PHP, takže notifikace zmizí, nebo se pošle pod špatnou událostí.
+    """
+    try:
+        handle = open('/var/run/devicemonitor.scan.lock', 'w')
+    except OSError:
+        return None
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
 def main():
     """Hlavní entry point s parsováním argumentů"""
     
@@ -730,6 +750,11 @@ Examples:
     if args.verbose:
         DEBUG_LOGGING = True
         LOG_LEVEL = 'debug'
+
+    scan_lock = acquire_scan_lock()
+    if scan_lock is None:
+        log("Jiný sken už běží, tento se přeskakuje")
+        return 0
     
     try:
         # Rozhodnutí podle režimu

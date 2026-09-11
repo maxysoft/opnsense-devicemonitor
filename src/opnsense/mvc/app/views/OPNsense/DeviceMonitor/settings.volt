@@ -55,7 +55,7 @@ $(document).ready(function () {
     function notify(text, isError) {
         msg.removeClass("hidden alert-danger alert-success")
            .addClass(isError ? "alert-danger" : "alert-success")
-           .html(text);
+           .text(text);
     }
 
     function busy(id, on) {
