@@ -69,6 +69,20 @@ class NotificationHandler
         return ($parts['scheme'] ?? '') . '://' . $parts['host'] . $path;
     }
 
+    /**
+     * HTTP header values are ASCII. An emoji in a title makes an HTTP/2 server
+     * reset the stream with PROTOCOL_ERROR, which is what broke ntfy delivery.
+     * ntfy documents RFC 2047 for this, so encode only when necessary.
+     */
+    private static function headerValue($value)
+    {
+        $value = (string)$value;
+        if ($value === '' || preg_match('/^[\x20-\x7E]*$/', $value)) {
+            return $value;
+        }
+        return '=?UTF-8?B?' . base64_encode($value) . '?=';
+    }
+
     /** Collapsed, length-capped body for the log. */
     private static function snippet($body, $max = 200)
     {
@@ -485,7 +499,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_POST, 1);
                     curl_setopt($ch, CURLOPT_POSTFIELDS, 'Device Monitor webhook is working! ✅');
                     curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        'Title: 🧪 OPNsense Test',
+                        'Title: ' . self::headerValue('🧪 OPNsense Test'),
                         'Tags: test,opnsense',
                         'Priority: 3'
                     ]);
@@ -589,7 +603,7 @@ HTML;
                     curl_setopt($ch, CURLOPT_POST, 1);
                     curl_setopt($ch, CURLOPT_POSTFIELDS, $msg);
                     curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        "Title: {$icon} OPNsense: {$count} {$eventText}",
+                        'Title: ' . self::headerValue("{$icon} OPNsense: {$count} {$eventText}"),
                         'Tags: opnsense,network',
                         'Priority: ' . (($count > 3) ? '4' : '3')
                     ]);

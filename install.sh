@@ -92,6 +92,7 @@ mkdir -p /usr/local/opnsense/service/templates/OPNsense/DeviceMonitor
 mkdir -p /usr/local/opnsense/www/js/widgets/Metadata
 mkdir -p /usr/local/etc/inc/plugins.inc.d
 mkdir -p /usr/local/etc/rc.d
+mkdir -p /usr/local/etc/newsyslog.conf.d
 mkdir -p /etc/rc.d
 mkdir -p /var/db/devicemonitor
 chmod 755 /var/db/devicemonitor
@@ -122,6 +123,15 @@ if [ -f "src/etc/inc/plugins.inc.d/devicemonitor.inc" ]; then
     echo "  ✓ Registrace služby v Diagnostics → Services"
 else
     echo "  ✗ VAROVÁNÍ: plugins.inc.d/devicemonitor.inc nenalezen!"
+fi
+
+# Rotace logu, jinak /var/log/devicemonitor.log roste bez omezení
+if [ -f "src/etc/newsyslog.conf.d/devicemonitor.conf" ]; then
+    cp src/etc/newsyslog.conf.d/devicemonitor.conf /usr/local/etc/newsyslog.conf.d/
+    chmod 644 /usr/local/etc/newsyslog.conf.d/devicemonitor.conf
+    echo "  ✓ Rotace logu nastavena"
+else
+    echo "  ✗ VAROVÁNÍ: newsyslog.conf.d/devicemonitor.conf nenalezen!"
 fi
 
 # ============================================
@@ -180,8 +190,6 @@ fi
 echo ""
 echo "[7/9] Kopíruji MVC soubory..."
 
-cp src/opnsense/mvc/app/models/OPNsense/DeviceMonitor/DeviceMonitor.xml \
-   /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/
 cp src/opnsense/mvc/app/models/OPNsense/DeviceMonitor/DeviceMonitor.php \
    /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/
 cp src/opnsense/mvc/app/models/OPNsense/DeviceMonitor/Menu/Menu.xml \
