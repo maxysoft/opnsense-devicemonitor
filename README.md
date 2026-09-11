@@ -37,7 +37,7 @@ The plugin automatically monitors the network and alerts you about:
 - 🆕 **New devices** connecting to the network
 - 📊 **Device history** with first/last detection timestamps
 - 📧 **Email notifications** with professional HTML design
-- 🔔 **Webhook notifications** (ntfy.sh, Discord, custom)
+- 🔔 **Webhook notifications** (ntfy.sh, Discord, Apprise, custom)
 - 🖥️ **Dashboard widget** on the OPNsense Lobby page
 
 ---
@@ -210,7 +210,7 @@ Also removed broken `configctl webgui restart` and `service php-fpm restart` cal
 
 ✅ **Device discovery** via OPNsense hostwatch SQLite database (`/var/db/hostwatch/hosts.db`)
 ✅ **Email notifications** — professional HTML emails with inline CSS
-✅ **Webhook notifications** — ntfy.sh, Discord, custom HTTP POST endpoints
+✅ **Webhook notifications** — ntfy.sh, Discord, Apprise, custom HTTP POST endpoints
 ✅ **Device history** — first/last detection timestamps
 ✅ **Vendor lookup** — manufacturer from MAC address (IEEE OUI database)
 
@@ -361,7 +361,51 @@ Existing installations continue to use **Local Sendmail / Postfix** after upgrad
 
 - **ntfy.sh** — `https://ntfy.sh/yourSecretTopic`
 - **Discord** — `https://discord.com/api/webhooks/...`
+- **Apprise API** — `http://apprise.lan:8000/notify/opnsense`
 - **Generic** — any HTTP POST endpoint receiving JSON
+
+Set **Webhook type** explicitly. Detection from the URL is only a fallback and
+guesses wrong for a self-hosted ntfy on a hostname that does not say so.
+
+#### Apprise
+
+[Apprise API](https://github.com/caronc/apprise-api) forwards one notification
+to any of its 100+ services, so the targets live there instead of in this
+plugin. Run it next to whatever else you self-host:
+
+```yaml
+services:
+  apprise:
+    image: caronc/apprise:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apprise/config:/config
+    environment:
+      APPRISE_STATEFUL_MODE: simple
+      APPRISE_ADMIN: "y"
+```
+
+Open `http://<host>:8000/`, choose a key such as `opnsense`, and paste the
+target URLs (`ntfys://ntfy.example.com/topic`, `discord://...`, `mailto://...`).
+Point **Webhook URL** at `http://<host>:8000/notify/opnsense`.
+
+The plugin posts `{"title": ..., "body": ..., "type": ..., "format": "markdown"}`,
+where `type` is `info` for a new device, `success` for one coming online and
+`warning` for one going offline.
+
+Apprise API has no authentication of its own, by design, and its stored
+configuration holds your tokens in plaintext. Keep it on the LAN, or put basic
+authentication in front of it as its README documents.
+
+#### TLS
+
+Certificates issued by a CA of this firewall are trusted automatically: OPNsense
+writes everything from **System > Trust > Authorities** into the system trust
+store, and the plugin verifies against it. **Skip TLS verification** is only for
+an endpoint whose certificate cannot be verified at all — it exposes the webhook
+URL, which is usually itself the credential, to anyone on the path.
 
 ---
 

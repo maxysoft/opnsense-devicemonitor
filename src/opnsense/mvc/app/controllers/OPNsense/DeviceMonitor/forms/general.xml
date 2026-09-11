@@ -95,19 +95,19 @@
         <id>devicemonitor.general.webhook_type</id>
         <label>Webhook type</label>
         <type>dropdown</type>
-        <help>Picks the payload format. Detect from the URL looks for "ntfy" or "discord" in it, which is wrong for a self-hosted ntfy on another hostname, so set it explicitly if delivery arrives as raw JSON.</help>
+        <help>Picks the payload format. Apprise API posts to an Apprise server, which forwards to every target configured under the key in the URL. Detect from the URL looks for "/notify/", "ntfy" or "discord" in it, which is wrong for a self-hosted ntfy on another hostname, so set it explicitly if delivery arrives as raw JSON.</help>
     </field>
     <field>
         <id>devicemonitor.general.webhook_insecure</id>
         <label>Skip TLS verification</label>
         <type>checkbox</type>
-        <help>Only for an endpoint with a self-signed certificate. A webhook URL normally contains the credential, so leaving this off keeps it from anyone able to intercept the connection.</help>
+        <help>Last resort for an endpoint whose certificate cannot be verified. A certificate issued by a CA of this firewall needs no exception: add that CA under System > Trust > Authorities and it is trusted here. A webhook URL normally contains the credential, so leaving this off keeps it from anyone able to intercept the connection.</help>
     </field>
     <field>
         <id>devicemonitor.general.webhook_url</id>
         <label>Webhook URL</label>
         <type>text</type>
-        <help>For example https://ntfy.sh/your_topic, a Discord webhook, or your own endpoint.</help>
+        <help>For example https://ntfy.sh/your_topic, an Apprise API key endpoint such as http://apprise.lan:8000/notify/opnsense, a Discord webhook, or your own endpoint.</help>
     </field>
     <field>
         <id>devicemonitor.general.webhook_interfaces</id>

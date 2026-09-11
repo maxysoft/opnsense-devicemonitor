@@ -6,6 +6,7 @@
 
 // Načtení třídy DeviceMonitor
 require_once('/usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/DeviceMonitor.php');
+require_once('/usr/local/opnsense/scripts/OPNsense/DeviceMonitor/WebhookPayload.php');
 
 class NotificationHandler
 {
@@ -82,6 +83,20 @@ class NotificationHandler
         }
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, !$insecure);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $insecure ? 0 : 2);
+        if (!$insecure) {
+            // OPNsense writes every authority from System > Trust > Authorities
+            // into /etc/ssl/certs and the bundle below, so an endpoint whose
+            // certificate was issued by the firewall's own CA verifies with no
+            // need to turn verification off. Name those paths rather than
+            // relying on the build-time default: OPNsense deletes
+            // /etc/ssl/cert.pem on purpose and keeps the directory instead.
+            if (is_dir('/etc/ssl/certs')) {
+                curl_setopt($ch, CURLOPT_CAPATH, '/etc/ssl/certs');
+            }
+            if (is_file('/usr/local/etc/ssl/cert.pem')) {
+                curl_setopt($ch, CURLOPT_CAINFO, '/usr/local/etc/ssl/cert.pem');
+            }
+        }
         curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
         curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
     }
@@ -512,7 +527,7 @@ HTML;
         try {
             $cfg = \OPNsense\DeviceMonitor\DeviceMonitor::getConfig();
             $configured = strtolower((string)($cfg['webhook_type'] ?? 'auto'));
-            if (in_array($configured, ['generic', 'ntfy', 'discord'], true)) {
+            if (in_array($configured, ['generic', 'ntfy', 'discord', 'apprise'], true)) {
                 $type = $configured;
             }
         } catch (\Throwable $e) {
@@ -520,7 +535,9 @@ HTML;
         }
         if ($type === null) {
             $type = 'generic';
-            if (stripos($webhook_url, 'ntfy') !== false) {
+            if (stripos($webhook_url, '/notify/') !== false) {
+                $type = 'apprise';
+            } elseif (stripos($webhook_url, 'ntfy') !== false) {
                 $type = 'ntfy';
             } elseif (stripos($webhook_url, 'discord') !== false) {
                 $type = 'discord';
@@ -575,6 +592,18 @@ HTML;
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
                     self::secureCurl($ch);
                     
+                } elseif ($type === 'apprise') {
+                    // APPRISE API TEST
+                    $ch = curl_init($webhook_url);
+                    curl_setopt($ch, CURLOPT_POST, 1);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(
+                        WebhookPayload::appriseTest(gethostname())
+                    ));
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+                    self::secureCurl($ch);
+
                 } else {
                     // GENERIC TEST
                     $payload = [
@@ -680,6 +709,31 @@ HTML;
                     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
                     self::secureCurl($ch);
                     
+                } elseif ($type === 'apprise') {
+                    // APPRISE API REAL
+                    // Apprise fans the message out to whatever targets are
+                    // stored under the key in the URL, so the payload stays
+                    // service-neutral: body, title, severity, format.
+                    $rows = [];
+                    foreach (array_slice($devices, 0, 10) as $d) {
+                        $rows[] = [
+                            'mac' => $d['mac'] ?? '',
+                            'vendor' => $d['vendor'] ?? null,
+                            'ip' => $d['ip'] ?? '',
+                            'iface' => \OPNsense\DeviceMonitor\DeviceMonitor::describeInterface($d['vlan'] ?? ''),
+                        ];
+                    }
+
+                    $ch = curl_init($webhook_url);
+                    curl_setopt($ch, CURLOPT_POST, 1);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(
+                        WebhookPayload::apprise($event, $rows, $hostname, $count)
+                    ));
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+                    self::secureCurl($ch);
+
                 } else {
                     // GENERIC REAL
                     $payload = [
@@ -731,6 +785,14 @@ HTML;
             // nothing useful. Report the transport error instead.
             if ((int)$http_code === 0) {
                 $reason = $curl_error !== '' ? $curl_error : 'no response from the server';
+                // 51 and 60 are curl's certificate verification failures. Here
+                // that normally means the issuing authority is not in the
+                // firewall's trust store, which is fixable without weakening
+                // TLS, so say that instead of leaving the raw curl wording.
+                if (in_array((int)$curl_errno, [51, 60], true)) {
+                    $reason .= '. Import the issuing authority under System > Trust > Authorities,'
+                        . ' or tick Skip TLS verification';
+                }
                 $this->fLog("webhook failed before any response: {$reason}", 'WEBHOOK');
                 return [
                     'result' => 'failed',

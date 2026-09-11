@@ -108,6 +108,7 @@
                     <generic>Generic JSON</generic>
                     <ntfy>ntfy server</ntfy>
                     <discord>Discord</discord>
+                    <apprise>Apprise API</apprise>
                 </OptionValues>
             </webhook_type>
             <!-- Only for a self-signed endpoint. The URL of a webhook is
