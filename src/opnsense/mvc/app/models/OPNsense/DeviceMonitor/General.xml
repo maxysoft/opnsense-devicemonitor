@@ -12,6 +12,16 @@
             <monitor_interfaces type="InterfaceField">
                 <Multiple>Y</Multiple>
             </monitor_interfaces>
+            <!-- debug adds the per-request detail needed to diagnose a
+                 delivery failure. It is noisy, so it is not the default. -->
+            <log_level type="OptionField">
+                <Default>info</Default>
+                <Required>Y</Required>
+                <OptionValues>
+                    <info>Normal</info>
+                    <debug>Debug (verbose)</debug>
+                </OptionValues>
+            </log_level>
             <scan_interval type="IntegerField">
                 <Default>300</Default>
                 <Required>Y</Required>

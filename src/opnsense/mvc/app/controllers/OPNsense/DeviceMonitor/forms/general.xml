@@ -12,6 +12,12 @@
         <help>Only devices seen on these interfaces are recorded. Leave empty to monitor every assigned interface.</help>
     </field>
     <field>
+        <id>devicemonitor.general.log_level</id>
+        <label>Log level</label>
+        <type>dropdown</type>
+        <help>Debug records each notification attempt, including the transport error behind a failed delivery, in /var/log/devicemonitor.log. Webhook URLs are reduced to their host before logging.</help>
+    </field>
+    <field>
         <id>devicemonitor.general.scan_interval</id>
         <label>Scan interval</label>
         <type>text</type>

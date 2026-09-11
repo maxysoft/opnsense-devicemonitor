@@ -39,14 +39,21 @@ DEFAULT_CONFIG = _defaults['config']
 # ================================================================
 
 
-def log(message):
+# Nastaveno z konfigurace v load_config(). "debug" zapne podrobné zprávy.
+LOG_LEVEL = str(DEFAULT_CONFIG.get('log_level', 'info')).lower()
+
+
+def log(message, level='INFO'):
     """Standardní append logging (rychlé!)"""
     if not DEBUG_LOGGING:
         return
-    
+    if level.upper() == 'DEBUG' and LOG_LEVEL != 'debug':
+        return
+
     timestamp = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+    prefix = 'DEBUG: ' if level.upper() == 'DEBUG' else ''
     with open("/var/log/devicemonitor.log", "a") as f:
-        f.write(f"{timestamp} - {message}\n")
+        f.write(f"{timestamp} - {prefix}{message}\n")
 
 def load_config():
     """Načte runtime konfiguraci"""
@@ -73,7 +80,10 @@ def load_config():
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-            
+
+            global LOG_LEVEL
+            LOG_LEVEL = str(config.get('log_level', LOG_LEVEL)).lower()
+
             return {
                 'enabled': config.get('enabled', '0') == '1',
                 'email_enabled': config.get('email_enabled', '1') == '1',
@@ -716,9 +726,10 @@ Examples:
     args = parser.parse_args()
     
     # Verbose mode
-    global DEBUG_LOGGING
+    global DEBUG_LOGGING, LOG_LEVEL
     if args.verbose:
         DEBUG_LOGGING = True
+        LOG_LEVEL = 'debug'
     
     try:
         # Rozhodnutí podle režimu

@@ -11,9 +11,73 @@ class NotificationHandler
 {
     private $log_file = '/var/log/devicemonitor.log';
     
-    public function fLog($message, $context = 'NOTIFICATION') {
+    private static $logLevel = null;
+
+    /**
+     * "info" or "debug", from the rendered configuration, so the switch in the
+     * GUI takes effect without editing code.
+     */
+    private static function logLevel()
+    {
+        if (self::$logLevel === null) {
+            $level = 'info';
+            try {
+                $config = \OPNsense\DeviceMonitor\DeviceMonitor::getConfig();
+                if (!empty($config['log_level'])) {
+                    $level = strtolower((string)$config['log_level']);
+                }
+            } catch (\Throwable $e) {
+                // An unreadable config just means the default level.
+            }
+            self::$logLevel = $level === 'debug' ? 'debug' : 'info';
+        }
+        return self::$logLevel;
+    }
+
+    public function fLog($message, $context = 'NOTIFICATION', $level = 'INFO')
+    {
+        $level = strtoupper($level);
+        if ($level === 'DEBUG' && self::logLevel() !== 'debug') {
+            return;
+        }
         $timestamp = date('Y-m-d H:i:s');
-        file_put_contents($this->log_file, "[{$timestamp}] [PHP-{$context}] {$message}\n", FILE_APPEND);
+        file_put_contents(
+            $this->log_file,
+            "[{$timestamp}] [PHP-{$context}] [{$level}] {$message}\n",
+            FILE_APPEND
+        );
+    }
+
+    /**
+     * Host and a short path only. Discord and ntfy put a secret in the URL, so
+     * the whole thing must never reach the log.
+     */
+    private static function redactUrl($url)
+    {
+        $url = trim((string)$url);
+        if ($url === '') {
+            return '(empty)';
+        }
+        $parts = @parse_url($url);
+        if (!is_array($parts) || empty($parts['host'])) {
+            return '(unparseable)';
+        }
+        $path = $parts['path'] ?? '';
+        if (strlen($path) > 16) {
+            $path = substr($path, 0, 16) . '...';
+        }
+        return ($parts['scheme'] ?? '') . '://' . $parts['host'] . $path;
+    }
+
+    /** Collapsed, length-capped body for the log. */
+    private static function snippet($body, $max = 200)
+    {
+        $body = trim((string)$body);
+        if ($body === '') {
+            return '';
+        }
+        $body = preg_replace('/\s+/', ' ', $body);
+        return strlen($body) > $max ? substr($body, 0, $max) . '...' : $body;
     }
 
     
@@ -394,8 +458,15 @@ HTML;
             
             $webhook_url = $config['webhook_url'];
         }
-        
-        
+
+        // An empty URL reaches curl as a bad-format error, which reads like a
+        // network problem. Say what it actually is.
+        $webhook_url = trim((string)$webhook_url);
+        if ($webhook_url === '') {
+            $this->fLog('no webhook URL was supplied', 'WEBHOOK');
+            return ['result' => 'failed', 'message' => 'No webhook URL is set.'];
+        }
+
         // DETEKCE TYPU WEBHOOKU
         $type = 'generic';
         if (stripos($webhook_url, 'ntfy') !== false) {
@@ -579,8 +650,21 @@ HTML;
             // Odešli webhook
             $response = curl_exec($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            // Read both before curl_close(), or the reason is lost.
+            $curl_errno = curl_errno($ch);
+            $curl_error = curl_error($ch);
+            $effective_url = (string)curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
             curl_close($ch);
-            
+
+            $this->fLog(sprintf(
+                'webhook type=%s http=%d errno=%d url=%s',
+                $type,
+                $http_code,
+                $curl_errno,
+                self::redactUrl($effective_url)
+            ), 'WEBHOOK', 'DEBUG');
+            $this->fLog('webhook response body: ' . self::snippet($response), 'WEBHOOK', 'DEBUG');
+
             if ($http_code >= 200 && $http_code < 300) {
                 return [
                     'result' => $is_test ? 'ok' : 'sent',
@@ -589,11 +673,32 @@ HTML;
                     'test' => $is_test,
                     'count' => $is_test ? 0 : count($devices ?? [])
                 ];
-            } else {
-                return ['result' => 'failed', 'message' => "HTTP $http_code"];
             }
-            
+
+            // http_code 0 means nothing ever answered, so the status alone says
+            // nothing useful. Report the transport error instead.
+            if ((int)$http_code === 0) {
+                $reason = $curl_error !== '' ? $curl_error : 'no response from the server';
+                $this->fLog("webhook failed before any response: {$reason}", 'WEBHOOK');
+                return [
+                    'result' => 'failed',
+                    'message' => "Could not reach the webhook: {$reason}",
+                    'type' => $type,
+                    'curl_errno' => $curl_errno,
+                ];
+            }
+
+            $detail = self::snippet($response);
+            $this->fLog("webhook rejected with HTTP {$http_code}: {$detail}", 'WEBHOOK');
+            return [
+                'result' => 'failed',
+                'message' => "Webhook rejected the request (HTTP {$http_code})"
+                    . ($detail !== '' ? ": {$detail}" : ''),
+                'type' => $type,
+            ];
+
         } catch (\Exception $e) {
+            $this->fLog('webhook exception: ' . $e->getMessage(), 'WEBHOOK');
             return ['result' => 'failed', 'message' => $e->getMessage()];
         }
     }

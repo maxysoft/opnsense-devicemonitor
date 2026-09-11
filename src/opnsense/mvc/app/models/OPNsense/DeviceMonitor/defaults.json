@@ -13,6 +13,7 @@
   },
   "config": {
     "enabled": "0",
+    "log_level": "info",
     "email_enabled": "0",
     "notify_events": "new",
     "monitor_interfaces": "",

@@ -98,6 +98,9 @@ def load_config():
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
             
+            global DEBUG_LOGGING
+            DEBUG_LOGGING = str(config.get('log_level', 'info')).lower() == 'debug'
+
             enabled = config.get('enabled', '0') == '1'
             scan_interval = int(config.get('scan_interval', 300))
             
