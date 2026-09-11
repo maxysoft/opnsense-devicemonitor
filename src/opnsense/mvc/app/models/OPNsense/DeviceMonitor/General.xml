@@ -106,7 +106,7 @@
                 <OptionValues>
                     <auto>Detect from the URL</auto>
                     <generic>Generic JSON</generic>
-                    <ntfy>ntfy</ntfy>
+                    <ntfy>ntfy server</ntfy>
                     <discord>Discord</discord>
                 </OptionValues>
             </webhook_type>
