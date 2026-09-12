@@ -219,7 +219,24 @@ class DevicesController extends ApiControllerBase
     }
 
     /**
-     * Ping zařízení a aktualizuj jeho status
+     * Every neighbour the firewall currently has a usable entry for.
+     *
+     * Read directly rather than through configd, whose arp action is cached
+     * for 30 seconds: too stale for a button whose whole job is to answer
+     * "is it up right now". No input reaches either command line.
+     */
+    private function neighbours()
+    {
+        $arp = [];
+        @exec('/usr/sbin/arp -an --libxo json 2>/dev/null', $arp);
+        $ndp = [];
+        @exec('/usr/sbin/ndp -an 2>/dev/null', $ndp);
+
+        return DeviceMonitor::parseNeighbours(implode('', $arp), implode("\n", $ndp));
+    }
+
+    /**
+     * Check whether a device is reachable and store the answer
      * POST /api/devicemonitor/devices/pingdevice
      */
     public function pingdeviceAction()
@@ -237,14 +254,30 @@ class DevicesController extends ApiControllerBase
                 return ['result' => 'failed', 'error' => 'Invalid IP'];
             }
 
-            // Ping - 2 pakety, timeout 1s
-            exec('ping -c 2 -W 1 ' . escapeshellarg($ip) . ' > /dev/null 2>&1', $out, $ret);
-            $online = ($ret === 0) ? 1 : 0;
+            // One probe, to make the firewall resolve the address. Its own
+            // result is deliberately ignored: a device that drops ICMP still
+            // has to answer ARP or NDP for the probe to arrive. -W is in
+            // milliseconds, which is why the old "-W 1" reported almost
+            // everything as offline.
+            $v6 = strpos($ip, ':') !== false;
+            @exec(sprintf(
+                '/sbin/ping %s -c 1 -W 1000 -t 2 %s > /dev/null 2>&1',
+                $v6 ? '-6' : '-4',
+                escapeshellarg($ip)
+            ));
+
+            $neighbours = $this->neighbours();
+            $online = (
+                in_array(DeviceMonitor::normaliseMac($mac), $neighbours['macs'], true)
+                || in_array(strtolower($ip), $neighbours['ips'], true)
+            ) ? 1 : 0;
 
             // Aktualizuj DB
             $paths = $this->getPaths();
             try {
                 $db = new \SQLite3($paths['dbFile']);
+                $db->enableExceptions(true);
+                $db->busyTimeout(2000);
                 $stmt = $db->prepare(
                     'UPDATE devices SET is_active = :active WHERE mac = :mac'
                 );

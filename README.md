@@ -428,6 +428,19 @@ URL, which is usually itself the credential, to anyone on the path.
 
 ## Usage
 
+### How the online status is determined
+
+The device list follows OPNsense's own host discovery (hostwatch), which records
+a device whenever it is seen on the network, from ARP, NDP, DHCP or DNS. A
+device counts as online when it was seen within the last 15 minutes, so nothing
+depends on it answering a ping.
+
+The **Check online** button on a row does not rely on ICMP either. It sends one
+probe so the firewall resolves the address, then looks the device up in the
+ARP/NDP neighbour table — the same signal the DHCP leases pages use for their
+own online column. A device that drops pings still has to answer ARP for any
+traffic to reach it, so it is reported correctly.
+
 ### Lobby dashboard widget
 
 After installation, add the **Device Monitor** widget to the Lobby dashboard. It shows:

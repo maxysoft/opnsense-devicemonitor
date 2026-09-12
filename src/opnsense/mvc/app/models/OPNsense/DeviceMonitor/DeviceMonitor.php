@@ -239,6 +239,77 @@ class DeviceMonitor
      * @return array Seznam zařízení (upravený podle konfigurace)
      */
     /**
+     * Normalise a MAC for comparison: arp(8) prints an octet without its
+     * leading zero, while the scanner stores it padded.
+     */
+    public static function normaliseMac($mac)
+    {
+        $parts = explode(':', strtolower(trim((string)$mac)));
+        if (count($parts) !== 6) {
+            return '';
+        }
+        foreach ($parts as $i => $part) {
+            if (!preg_match('/^[0-9a-f]{1,2}$/', $part)) {
+                return '';
+            }
+            $parts[$i] = str_pad($part, 2, '0', STR_PAD_LEFT);
+        }
+        return implode(':', $parts);
+    }
+
+    /**
+     * The MACs and addresses the firewall currently has a usable neighbour
+     * entry for, from the output of arp(8) and ndp(8).
+     *
+     * This is what the DHCP leases pages call "online": a device has to answer
+     * ARP, or NDP on IPv6, for any traffic to reach it at all, while plenty of
+     * devices drop ICMP on purpose.
+     *
+     * Incomplete and expired entries are skipped - they mean the firewall
+     * asked and got no answer, which is the opposite of reachable.
+     */
+    public static function parseNeighbours($arpJson, $ndpOutput)
+    {
+        $macs = [];
+        $ips = [];
+
+        $arp = json_decode((string)$arpJson, true);
+        foreach ($arp['arp']['arp-cache'] ?? [] as $entry) {
+            if (!empty($entry['incomplete']) || !empty($entry['expired'])) {
+                continue;
+            }
+            $mac = self::normaliseMac($entry['mac-address'] ?? '');
+            if ($mac !== '') {
+                $macs[] = $mac;
+            }
+            if (!empty($entry['ip-address'])) {
+                $ips[] = strtolower((string)$entry['ip-address']);
+            }
+        }
+
+        // ndp(8) has no JSON output. Its first line is a header whose second
+        // column is not a MAC, so it drops out with the incomplete entries.
+        foreach (preg_split('/\r?\n/', (string)$ndpOutput) as $line) {
+            $parts = preg_split('/\s+/', trim($line));
+            if (count($parts) < 3) {
+                continue;
+            }
+            $mac = self::normaliseMac($parts[1]);
+            if ($mac === '') {
+                continue;
+            }
+            $macs[] = $mac;
+            // fe80::1%igc0 -> fe80::1, or nothing would ever match.
+            $ips[] = strtolower(explode('%', $parts[0])[0]);
+        }
+
+        return [
+            'macs' => array_values(array_unique($macs)),
+            'ips' => array_values(array_unique($ips)),
+        ];
+    }
+
+    /**
      * Render a timestamp written by the scanner in the firewall's timezone.
      *
      * The scanner stores UTC, while PHP here runs with date.timezone set from
