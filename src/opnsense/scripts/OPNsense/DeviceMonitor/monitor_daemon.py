@@ -36,6 +36,10 @@ DB_FILE = PATHS['dbFile']
 PID_FILE = PATHS['pidFile']
 SCAN_SCRIPT = PATHS['scanScript']
 DEFAULT_CONFIG = _defaults['config']
+
+# Retries have to keep running between scans: a scan interval of an hour must
+# not mean an hour between two attempts at the same failed notification.
+QUEUE_INTERVAL = 30
 # ================================================================
 
 running = True
@@ -149,6 +153,21 @@ def run_scan():
         log(f"Scan error: {e}", level='INFO')
         return False
 
+def run_queue():
+    """Doručí frontu notifikací (rychlé, když je prázdná)"""
+    try:
+        result = subprocess.run(
+            ['/usr/local/bin/python3', SCAN_SCRIPT, '--process-queue'],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode != 0:
+            log(f"Queue run failed with code {result.returncode}", level='DEBUG')
+    except Exception as e:
+        log(f"Queue error: {e}", level='DEBUG')
+
+
 def main():
     """Hlavní smyčka daemona"""
     global running
@@ -163,6 +182,7 @@ def main():
     config = load_config()
     
     last_scan = 0
+    last_queue = 0
     last_config_state = None  # Pro sledování změn konfigurace
     last_interval = None      # Pro sledování změn intervalu
     
@@ -198,6 +218,13 @@ def main():
                     log(f"Running scheduled scan", level='INFO')
                     run_scan()
                     last_scan = current_time
+
+            # Deliberately outside the enabled check: a notification that is
+            # already queued has to reach its destination even if monitoring
+            # is switched off afterwards.
+            if time.time() - last_queue >= QUEUE_INTERVAL:
+                run_queue()
+                last_queue = time.time()
             
             # Spinkej 10 sekund před další kontrolou
             time.sleep(10)

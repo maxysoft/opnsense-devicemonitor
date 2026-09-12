@@ -8,6 +8,7 @@ import sys
 import argparse
 import subprocess
 import re
+import time
 import xml.etree.ElementTree as ET
 import fcntl
 
@@ -166,6 +167,25 @@ def init_db():
         c.execute('ALTER TABLE devices ADD COLUMN scan_active INTEGER DEFAULT 0')
     except:
         pass
+
+    # A failed delivery must not lose the event, so notifications are queued
+    # and retried rather than sent once and forgotten.
+    c.execute('''CREATE TABLE IF NOT EXISTS notification_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel TEXT NOT NULL,
+        event TEXT NOT NULL,
+        macs TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # The retry schedule is a property of the queue, not of one entry, so it
+    # lives in a single row rather than being repeated per notification.
+    c.execute('''CREATE TABLE IF NOT EXISTS notification_retry (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        attempts INTEGER DEFAULT 0,
+        next_attempt REAL DEFAULT 0,
+        last_error TEXT
+    )''')
 
     # Tombstones for manually deleted devices. Historical Hostwatch records
     # must not immediately recreate a device that the user removed.
@@ -417,87 +437,211 @@ def is_recently_seen(last_seen_str, minutes=15):
         return False
     
 
-def send_email_via_php_api(new_devices, event='new'):
-    """Označ zařízení v DB pro odeslání emailu"""
-    if not new_devices:
+# Notifications survive a failed delivery. The retry delay belongs to the
+# queue as a whole rather than to a single entry: one failure holds everything
+# back, and the next attempt then flushes all of it in one go.
+RETRY_BACKOFF = [30, 30, 60, 180, 300, 600, 1800, 3600]
+
+# An endpoint that stays unreachable for days must not grow the database
+# without bound. The oldest entries are the least worth keeping.
+QUEUE_LIMIT = 100
+
+CONFIGD_ACTIONS = {
+    'email': 'sendEmailNotification',
+    'webhook': 'sendWebhookNotification',
+}
+
+
+def read_retry_state():
+    """(attempts, next_attempt) for the queue as a whole."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            row = conn.execute(
+                'SELECT attempts, next_attempt FROM notification_retry WHERE id = 1'
+            ).fetchone()
+    except Exception:
+        return 0, 0.0
+    if not row:
+        return 0, 0.0
+    return int(row[0] or 0), float(row[1] or 0.0)
+
+
+def write_retry_state(attempts, next_attempt, last_error=''):
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute(
+                'INSERT INTO notification_retry (id, attempts, next_attempt, last_error)'
+                ' VALUES (1, ?, ?, ?)'
+                ' ON CONFLICT(id) DO UPDATE SET attempts = excluded.attempts,'
+                ' next_attempt = excluded.next_attempt, last_error = excluded.last_error',
+                (attempts, next_attempt, last_error)
+            )
+    except Exception as e:
+        log(f"[QUEUE] cannot record the retry state: {e}")
+
+
+def enqueue_notification(channel, event, devices):
+    """Record an event for delivery. process_queue() does the sending."""
+    macs = [d['mac'] for d in devices if d.get('mac')]
+    if not macs:
         return
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute(
+                'INSERT INTO notification_queue (channel, event, macs) VALUES (?, ?, ?)',
+                (channel, event, json.dumps(macs))
+            )
+            conn.execute(
+                'DELETE FROM notification_queue WHERE id NOT IN '
+                '(SELECT id FROM notification_queue ORDER BY id DESC LIMIT ?)',
+                (QUEUE_LIMIT,)
+            )
+    except Exception as e:
+        log(f"[QUEUE] cannot queue {channel}/{event}: {e}")
+
+
+def dispatch_queued(channel, event, macs):
+    """Send one batch. Returns (done, message).
+
+    done=True means the batch can be dropped: either it was delivered, or
+    there is nothing left to report. Only a real delivery failure is retried.
+    """
+    action = CONFIGD_ACTIONS.get(channel)
+    if action is None:
+        return True, f"unknown channel {channel}"
 
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        with sqlite3.connect(DB_FILE) as conn:
+            # The pending flag has to describe exactly this batch, because the
+            # PHP side reads the whole flagged set and sends it as one message.
+            conn.execute('UPDATE devices SET notification_pending = 0')
+            conn.executemany(
+                'UPDATE devices SET notification_pending = 1, pending_event = ? WHERE mac = ?',
+                [(event, mac) for mac in macs]
+            )
+            marked = conn.execute(
+                'SELECT COUNT(*) FROM devices WHERE notification_pending = 1'
+            ).fetchone()[0]
 
-        # Pending must represent exactly this delivery channel's filtered set.
-        cursor.execute("UPDATE devices SET notification_pending = 0")
+        if not marked:
+            # Every device in the batch has since been deleted.
+            return True, 'no devices left to report'
 
-        # Označ zařízení pro notifikaci
-        for device in new_devices:
-            cursor.execute("""
-                UPDATE devices
-                SET notification_pending = 1, pending_event = ?
-                WHERE mac = ?
-            """, (event, device['mac']))
-        
-        conn.commit()
-        # log(f"[EMAIL] Marked {len(new_devices)} devices for notification")
-        
-        # Zavolej PHP BEZ parametrů
         result = subprocess.run(
-            ['/usr/local/sbin/configctl', 'devicemonitor', 'sendEmailNotification'],
-            capture_output=True,
-            text=True,
-            timeout=30
+            ['/usr/local/sbin/configctl', 'devicemonitor', action],
+            capture_output=True, text=True, timeout=60
         )
-        
-        # log(f"[EMAIL] configctl returned: {result.returncode}")
-        # if result.stdout:
-        #     log(f"[EMAIL] stdout: {result.stdout[:200]}")
-        if result.stderr:
-            log(f"[EMAIL] stderr: {result.stderr[:200]}")
-            
     except Exception as e:
-        log(f"[EMAIL] Error: {e}")
+        return False, str(e)[:200]
+
+    # The notify scripts print a JSON verdict, which configd can wrap.
+    out = (result.stdout or '').strip()
+    start, end = out.find('{'), out.rfind('}')
+    verdict = {}
+    if start != -1 and end > start:
+        try:
+            verdict = json.loads(out[start:end + 1])
+        except ValueError:
+            verdict = {}
+
+    status = str(verdict.get('result', ''))
+    if status in ('sent', 'ok'):
+        return True, 'delivered'
+    if status == 'skipped':
+        # The channel is switched off or has nothing to report; retrying
+        # cannot help, so the batch is dropped. Logged, because for a user who
+        # disabled the channel to stop the noise this discards the backlog.
+        message = str(verdict.get('message', 'skipped'))[:200]
+        log(f"[QUEUE] {channel}/{event} dropped without sending: {message}")
+        return True, message
+    if not verdict:
+        return False, ((result.stderr or out) or 'configd returned no verdict').strip()[:200]
+    return False, str(verdict.get('message', 'delivery failed'))[:200]
 
 
-def send_webhook_via_php_api(new_devices, event='new'):
-    """Označ zařízení v DB pro odeslání webhooku"""
-    if not new_devices:
-        return
+def process_queue():
+    """Deliver the whole queue when it is due.
+
+    Entries for the same channel and event are merged into one message: the
+    PHP senders report the flagged set as a single notification, so a backlog
+    that built up over hours arrives as one message per channel and event
+    instead of dozens.
+    """
+    init_db()
+
+    attempts, next_attempt = read_retry_state()
+    now = time.time()
+    if next_attempt > now:
+        return 0
 
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-
-        # Pending must represent exactly this delivery channel's filtered set.
-        cursor.execute("UPDATE devices SET notification_pending = 0")
-
-        # Označ zařízení pro notifikaci
-        for device in new_devices:
-            cursor.execute("""
-                UPDATE devices
-                SET notification_pending = 1, pending_event = ?
-                WHERE mac = ?
-            """, (event, device['mac']))
-        
-        conn.commit()
-        # log(f"[WEBHOOK] Marked {len(new_devices)} devices for notification")
-        
-        # Zavolej PHP BEZ parametrů
-        result = subprocess.run(
-            ['/usr/local/sbin/configctl', 'devicemonitor', 'sendWebhookNotification'],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        # log(f"[WEBHOOK] configctl returned: {result.returncode}")
-        # if result.stdout:
-        #     log(f"[WEBHOOK] stdout: {result.stdout[:200]}")
-        if result.stderr:
-            log(f"[WEBHOOK] stderr: {result.stderr[:200]}")
-            
+        with sqlite3.connect(DB_FILE) as conn:
+            entries = conn.execute(
+                'SELECT id, channel, event, macs FROM notification_queue ORDER BY id'
+            ).fetchall()
     except Exception as e:
-        log(f"[WEBHOOK] Error: {e}")
-    
+        log(f"[QUEUE] cannot read the queue: {e}")
+        return 1
+
+    if not entries:
+        if attempts or next_attempt:
+            write_retry_state(0, 0, '')
+        return 0
+
+    batches = {}
+    order = []
+    for entry_id, channel, event, macs_json in entries:
+        try:
+            macs = json.loads(macs_json)
+        except ValueError:
+            macs = []
+        key = (channel, event)
+        if key not in batches:
+            batches[key] = {'ids': [], 'macs': []}
+            order.append(key)
+        batches[key]['ids'].append(entry_id)
+        for mac in macs:
+            if mac not in batches[key]['macs']:
+                batches[key]['macs'].append(mac)
+
+    delivered = []
+    failed = 0
+    last_error = ''
+    for channel, event in order:
+        batch = batches[(channel, event)]
+        done, message = dispatch_queued(channel, event, batch['macs'])
+        if done:
+            delivered.extend(batch['ids'])
+            log(f"[QUEUE] {channel}/{event}: {message}", 'DEBUG')
+        else:
+            failed += 1
+            last_error = message
+            log(f"[QUEUE] {channel}/{event} failed: {message}")
+
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            if delivered:
+                conn.execute(
+                    'DELETE FROM notification_queue WHERE id IN (%s)'
+                    % ','.join('?' * len(delivered)),
+                    delivered
+                )
+            # Never leave stale flags behind for the next run to pick up.
+            conn.execute('UPDATE devices SET notification_pending = 0')
+    except Exception as e:
+        log(f"[QUEUE] cannot update the queue: {e}")
+
+    if failed:
+        attempts += 1
+        delay = RETRY_BACKOFF[min(attempts - 1, len(RETRY_BACKOFF) - 1)]
+        write_retry_state(attempts, time.time() + delay, last_error)
+        log(f"[QUEUE] {failed} notification(s) undelivered; "
+            f"attempt {attempts}, retrying in {delay}s")
+    else:
+        write_retry_state(0, 0, '')
+
+    return 0
+
 
 # ================================================================
 # HLAVNÍ FUNKCE - REFAKTOROVANÉ
@@ -685,13 +829,13 @@ def full_scan():
             webhook_devs = [d for d in devs if not webhook_ifs or d.get('vlan', '') in webhook_ifs]
 
             if email_devs and config.get('email_enabled') and config.get('email_to'):
-                send_email_via_php_api(email_devs, event)
+                enqueue_notification('email', event, email_devs)
             if webhook_devs and config.get('webhook_enabled') and config.get('webhook_url'):
-                send_webhook_via_php_api(webhook_devs, event)
+                enqueue_notification('webhook', event, webhook_devs)
 
-    # Do not leave stale pending flags between scans/channels.
-    with sqlite3.connect(DB_FILE) as cleanup_conn:
-        cleanup_conn.execute('UPDATE devices SET notification_pending = 0')
+    # Deliver what is due, including anything an earlier scan could not get
+    # through. process_queue() clears the pending flags when it is finished.
+    process_queue()
 
     return 0
 
@@ -738,6 +882,12 @@ Examples:
     )
     
     parser.add_argument(
+        '--process-queue',
+        action='store_true',
+        help='Only deliver queued notifications that are due, then exit'
+    )
+
+    parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Enable verbose output'
@@ -758,6 +908,8 @@ Examples:
     
     try:
         # Rozhodnutí podle režimu
+        if args.process_queue:
+            return process_queue()
         if args.update_only:
             return update_status_only()
         else:

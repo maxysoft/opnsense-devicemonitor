@@ -211,6 +211,7 @@ Also removed broken `configctl webgui restart` and `service php-fpm restart` cal
 ✅ **Device discovery** via OPNsense hostwatch SQLite database (`/var/db/hostwatch/hosts.db`)
 ✅ **Email notifications** — professional HTML emails with inline CSS
 ✅ **Webhook notifications** — ntfy.sh, Discord, Apprise, custom HTTP POST endpoints
+✅ **Delivery retries** — a notification is queued until the endpoint accepts it
 ✅ **Device history** — first/last detection timestamps
 ✅ **Vendor lookup** — manufacturer from MAC address (IEEE OUI database)
 
@@ -398,6 +399,22 @@ where `type` is `info` for a new device, `success` for one coming online and
 Apprise API has no authentication of its own, by design, and its stored
 configuration holds your tokens in plaintext. Keep it on the LAN, or put basic
 authentication in front of it as its README documents.
+
+#### Delivery and retries
+
+A notification whose delivery fails is not lost. The event is queued, and the
+queue is retried as a whole on one schedule: 30s, 30s, 1m, 3m, 5m, 10m, 30m,
+then hourly for as long as it takes. Retries keep running while monitoring is
+switched off, so nothing is stranded by disabling the scanner.
+
+Everything queued for the same channel and event is merged into one message, so
+an endpoint that was unreachable for a day produces a single "device went
+offline" notification listing every device rather than one per scan.
+
+The Devices page shows a **Pending notifications** panel whenever the queue is
+not empty: what failed, when the next attempt is due, and buttons to retry at
+once or discard the backlog. Switching a channel off discards its queued
+notifications, which is recorded in `/var/log/devicemonitor.log`.
 
 #### TLS
 

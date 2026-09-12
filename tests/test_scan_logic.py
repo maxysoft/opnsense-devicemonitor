@@ -25,6 +25,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -82,11 +83,17 @@ def main():
     try:
         scanner = load_scanner(workdir)
 
+        # The scanner queues events and hands each one to dispatch_queued(),
+        # so that is the seam: it stands in for configd and the PHP senders.
         dispatched = []
-        scanner.send_email_via_php_api = (
-            lambda devices, event='new': dispatched.append((event, sorted(d['mac'] for d in devices)))
-        )
-        scanner.send_webhook_via_php_api = lambda devices, event='new': None
+        delivery = {'ok': True}
+
+        def fake_dispatch(channel, event, macs):
+            if channel == 'email':
+                dispatched.append((event, sorted(macs)))
+            return (delivery['ok'], 'delivered' if delivery['ok'] else 'endpoint refused')
+
+        scanner.dispatch_queued = fake_dispatch
 
         config = {
             'enabled': True, 'email_enabled': True, 'email_to': 'a@b.c',
@@ -172,6 +179,64 @@ def main():
         db.execute("UPDATE devices SET is_active = 0 WHERE mac = 'aa:11'")
         db.commit(); db.close()
         check('GUI ping does not fake a transition', scan(), [])
+
+        # A failed delivery used to be lost: the flags were cleared with the
+        # scan whether or not anything was actually sent. The retry schedule
+        # belongs to the queue as a whole, so one timer holds all of it.
+        def queue_entries():
+            db = sqlite3.connect(os.path.join(workdir, 'devices.db'))
+            rows = db.execute('SELECT channel, event, macs FROM notification_queue'
+                              ' ORDER BY id').fetchall()
+            db.close()
+            return [(c, e, sorted(json.loads(m))) for c, e, m in rows]
+
+        def retry_state():
+            db = sqlite3.connect(os.path.join(workdir, 'devices.db'))
+            row = db.execute('SELECT attempts, next_attempt FROM notification_retry'
+                             ' WHERE id = 1').fetchone()
+            db.close()
+            return row or (0, 0.0)
+
+        def force_due():
+            db = sqlite3.connect(os.path.join(workdir, 'devices.db'))
+            db.execute('UPDATE notification_retry SET next_attempt = 0')
+            db.commit()
+            db.close()
+
+        delivery['ok'] = False
+        hosts[:] = [device('aa:11'), device('bb:22', 'vlan0.11'), device('cc:33')]
+        check('a failed delivery is still attempted', scan(), [('new', ['cc:33'])])
+        check('a failed delivery stays queued', queue_entries(), [('email', 'new', ['cc:33'])])
+        check('the queue backs off 30s after one failure',
+              (retry_state()[0], round(retry_state()[1] - time.time())), (1, 30))
+
+        # Nothing is due yet, so a later event joins the queue instead of
+        # burning an attempt of its own.
+        hosts[:] = [device('aa:11'), device('bb:22', 'vlan0.11'),
+                    device('cc:33'), device('dd:44')]
+        check('a scan during the backoff does not dispatch', scan(), [])
+        check('but the new event is queued',
+              [(c, e) for c, e, _ in queue_entries()],
+              [('email', 'new'), ('email', 'new')])
+        check('and the attempt count is unchanged', retry_state()[0], 1)
+
+        force_due()
+        dispatched.clear()
+        scanner.process_queue()
+        check('a retry merges the backlog into one message',
+              list(dispatched), [('new', ['cc:33', 'dd:44'])])
+        check('a second failure still keeps one queue-wide timer',
+              (retry_state()[0], round(retry_state()[1] - time.time())), (2, 30))
+
+        delivery['ok'] = True
+        force_due()
+        dispatched.clear()
+        scanner.process_queue()
+        check('a later retry delivers everything at once',
+              list(dispatched), [('new', ['cc:33', 'dd:44'])])
+        check('and the queue empties', queue_entries(), [])
+        check('and the backoff resets',
+              (retry_state()[0], round(retry_state()[1])), (0, 0))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

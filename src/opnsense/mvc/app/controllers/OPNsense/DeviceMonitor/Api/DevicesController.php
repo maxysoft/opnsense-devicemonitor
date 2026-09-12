@@ -201,27 +201,6 @@ class DevicesController extends ApiControllerBase
     }
 
     /**
-    * Rychlá aktualizace online/offline statusu (hostwatch DB)
-     * POST /api/devicemonitor/devices/updatestatus
-     */
-    public function updatestatusAction()
-    {
-        
-        $paths = $this->getPaths();
-        
-        // Zavolej scan_network.py s --update-only
-        exec("{$paths['scanScript']} --update-only 2>&1", $output, $return_code);
-        
-        if ($return_code === 0) {
-            // Znovu načti statistiky z DB
-            return $this->statsAction();  // ← Správně!
-        }
-        
-        // Pokud scan selhal, vrať error
-        return ['result' => 'error', 'online' => 0, 'total' => 0];
-    }
-
-    /**
      * Smazání jednoho zařízení
      * POST /api/devicemonitor/devices/delete
      */
@@ -302,5 +281,137 @@ class DevicesController extends ApiControllerBase
         }
 
         return ['result' => 'failed'];
+    }
+
+    /**
+     * Notifications whose delivery failed and that are waiting for a retry
+     * GET /api/devicemonitor/devices/queue
+     */
+    public function queueAction()
+    {
+        $paths = $this->getPaths();
+        $rows = [];
+        $state = ['attempts' => 0, 'next_attempt' => '', 'last_error' => ''];
+
+        try {
+            if (file_exists($paths['dbFile'])) {
+                $db = new \SQLite3($paths['dbFile'], SQLITE3_OPEN_READONLY);
+                // Without this a failed statement only raises a warning and
+                // returns false, which the catch below would never see.
+                $db->enableExceptions(true);
+                $db->busyTimeout(2000);
+
+                // The scanner creates this table, so it is absent until the
+                // first scan runs after an upgrade.
+                $exists = $db->querySingle(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='notification_queue'"
+                );
+
+                if (!empty($exists)) {
+                    $result = $db->query(
+                        'SELECT id, channel, event, macs, created_at'
+                        . ' FROM notification_queue ORDER BY id'
+                    );
+                    while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+                        $macs = json_decode((string)$row['macs'], true);
+                        $macs = is_array($macs) ? $macs : [];
+                        $rows[] = [
+                            'id' => (int)$row['id'],
+                            'channel' => (string)$row['channel'],
+                            'event' => (string)$row['event'],
+                            'devices' => count($macs),
+                            'macs' => implode(', ', array_slice($macs, 0, 5)),
+                            'created_at' => (string)($row['created_at'] ?? ''),
+                        ];
+                    }
+
+                    // The retry schedule covers the queue as a whole, so it
+                    // is reported once rather than per entry.
+                    $retry = $db->querySingle(
+                        'SELECT attempts, next_attempt, last_error FROM notification_retry'
+                        . ' WHERE id = 1',
+                        true
+                    );
+                    if (is_array($retry)) {
+                        $state = [
+                            'attempts' => (int)$retry['attempts'],
+                            'next_attempt' => (float)$retry['next_attempt'] > 0
+                                ? date('Y-m-d H:i:s', (int)$retry['next_attempt'])
+                                : '',
+                            'last_error' => (string)($retry['last_error'] ?? ''),
+                        ];
+                    }
+                }
+
+                $db->close();
+            }
+        } catch (\Exception $e) {
+            return ['rows' => [], 'total' => 0, 'state' => $state, 'error' => $e->getMessage()];
+        }
+
+        return ['rows' => $rows, 'total' => count($rows), 'state' => $state];
+    }
+
+    /**
+     * Retry every queued notification now instead of waiting out its delay
+     * POST /api/devicemonitor/devices/retryqueue
+     */
+    public function retryqueueAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['result' => 'failed'];
+        }
+
+        $paths = $this->getPaths();
+
+        if (!file_exists($paths['dbFile'])) {
+            return ['result' => 'failed', 'error' => 'no database yet'];
+        }
+
+        try {
+            $db = new \SQLite3($paths['dbFile']);
+            $db->enableExceptions(true);
+            $db->busyTimeout(2000);
+            $db->query('UPDATE notification_retry SET attempts = 0, next_attempt = 0');
+            $db->close();
+        } catch (\Exception $e) {
+            return ['result' => 'failed', 'error' => $e->getMessage()];
+        }
+
+        // Through configd, because the notify scripts write a root-owned log.
+        $backend = new \OPNsense\Core\Backend();
+        $backend->configdRun('devicemonitor processQueue');
+
+        return $this->queueAction();
+    }
+
+    /**
+     * Drop every queued notification
+     * POST /api/devicemonitor/devices/discardqueue
+     */
+    public function discardqueueAction()
+    {
+        if (!$this->request->isPost()) {
+            return ['result' => 'failed'];
+        }
+
+        $paths = $this->getPaths();
+
+        if (!file_exists($paths['dbFile'])) {
+            return ['result' => 'failed', 'error' => 'no database yet'];
+        }
+
+        try {
+            $db = new \SQLite3($paths['dbFile']);
+            $db->enableExceptions(true);
+            $db->busyTimeout(2000);
+            $db->query('DELETE FROM notification_queue');
+            $db->query('UPDATE notification_retry SET attempts = 0, next_attempt = 0');
+            $db->close();
+        } catch (\Exception $e) {
+            return ['result' => 'failed', 'error' => $e->getMessage()];
+        }
+
+        return ['result' => 'discarded'];
     }
 }

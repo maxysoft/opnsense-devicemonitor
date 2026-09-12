@@ -87,6 +87,33 @@
             </thead>
             <tbody></tbody>
         </table>
+
+        <!-- Only shown when a delivery failed and is waiting to be retried. -->
+        <div id="queue-panel" style="display:none;margin-top:18px;border-top:2px solid #444;padding-top:12px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <strong style="font-size:14px;">{{ lang._('Pending notifications') }}</strong>
+                <span id="queue-count" class="label label-warning"></span>
+                <div style="flex-grow:1;"></div>
+                <button id="btn-queue-retry" class="btn btn-xs btn-default">
+                    <i class="fa fa-refresh"></i> {{ lang._('Retry now') }}
+                </button>
+                <button id="btn-queue-discard" class="btn btn-xs btn-danger">
+                    <i class="fa fa-trash"></i> {{ lang._('Discard') }}
+                </button>
+            </div>
+            <div id="queue-status" style="font-size:12px;color:#aaa;margin-bottom:6px;"></div>
+            <table class="table table-condensed table-striped" id="grid-queue">
+                <thead>
+                    <tr>
+                        <th style="white-space:nowrap;">{{ lang._('Channel') }}</th>
+                        <th style="white-space:nowrap;">{{ lang._('Event') }}</th>
+                        <th style="white-space:nowrap;">{{ lang._('Devices') }}</th>
+                        <th style="white-space:nowrap;">{{ lang._('Queued at') }}</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </div>
 </div>
 
@@ -109,7 +136,13 @@ $(document).ready(function() {
         reserved:       '{{ lang._('RESERVED') }}',
         reserved_hint:  '{{ lang._('This MAC has a DHCP reservation') }}',
         no_devices:     '{{ lang._('No devices recorded yet. They appear after the next scan.') }}',
-        none_match:     '{{ lang._('No devices match the current filters.') }}'
+        none_match:     '{{ lang._('No devices match the current filters.') }}',
+        queue_retry:    '{{ lang._('Retry now') }}',
+        queue_discarded:'{{ lang._('Queued notifications discarded') }}',
+        confirm_discard:'{{ lang._('Discard every notification still waiting to be delivered?') }}',
+        queue_attempts: '{{ lang._('%s delivery attempt(s) failed.') }}',
+        queue_next:     '{{ lang._('Next retry at') }}',
+        queue_error:    '{{ lang._('The queue could not be changed') }}'
     };
 
     var allRows = [], activeVlans = [], activeStatus = '', activeReserved = '', vlanNames = {};
@@ -117,6 +150,8 @@ $(document).ready(function() {
 
     // Obnov uložený VLAN filtr
     try { activeVlans = JSON.parse(localStorage.getItem('dm_vlan_filter') || '[]'); } catch(e) {}
+    // Anything but an array would throw in the filter and leave the table empty.
+    if (!Array.isArray(activeVlans)) activeVlans = [];
 
     // Toast
     function showToast(msg, type) {
@@ -125,7 +160,7 @@ $(document).ready(function() {
         var $t = $('<div>').css({position:'fixed',top:'20px',right:'20px','background-color':bg,color:'white',
             padding:'15px 20px','border-radius':'4px','box-shadow':'0 4px 8px rgba(0,0,0,.3)',
             'z-index':9999,'min-width':'280px',display:'none'})
-            .html('<i class="fa '+ic+'"></i> '+msg);
+            .append($('<i>').addClass('fa '+ic), ' ', document.createTextNode(msg));
         $('body').append($t); $t.fadeIn(300);
         setTimeout(function(){ $t.fadeOut(300,function(){ $t.remove(); }); },3000);
     }
@@ -141,6 +176,61 @@ $(document).ready(function() {
             $('#stat-online').text(d.online||0);
         }});
     }
+
+    // Notifications that could not be delivered yet. The panel stays hidden
+    // while the queue is empty, which is the normal case.
+    function loadQueue() {
+        $.ajax({url:'/api/devicemonitor/devices/queue',type:'GET',success:function(d){
+            var rows = (d && d.rows) || [];
+            var $tbody = $('#grid-queue tbody').empty();
+            if (!rows.length) { $('#queue-panel').hide(); return; }
+            rows.forEach(function(r){
+                // .text() throughout: these values reach the page from the
+                // network and must never be rendered as markup.
+                $('<tr>').append(
+                    $('<td>').text(r.channel||''),
+                    $('<td>').text(r.event||''),
+                    $('<td>').attr('title', r.macs||'').text(r.devices||0),
+                    $('<td>').text(r.created_at||'')
+                ).appendTo($tbody);
+            });
+            $('#queue-count').text(rows.length);
+
+            // One schedule for the whole queue, so it is reported once.
+            var state = (d && d.state) || {};
+            var $status = $('#queue-status').empty();
+            if (state.attempts) {
+                var line = translations.queue_attempts.replace('%s', state.attempts);
+                if (state.next_attempt) {
+                    line += ' ' + translations.queue_next + ' ' + state.next_attempt + '.';
+                }
+                $status.append(document.createTextNode(line + ' '));
+                if (state.last_error) {
+                    $status.append($('<span>').css('color','#d9534f').text(state.last_error));
+                }
+            }
+            $('#queue-panel').show();
+        }});
+    }
+
+    $('#btn-queue-retry').on('click', function() {
+        var $btn = $(this);
+        $btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i>');
+        $.ajax({url:'/api/devicemonitor/devices/retryqueue',type:'POST',complete:function(){
+            $btn.prop('disabled', false)
+                .html('<i class="fa fa-refresh"></i> ' + translations.queue_retry);
+            loadQueue();
+        }});
+    });
+
+    $('#btn-queue-discard').on('click', function() {
+        if (!confirm(translations.confirm_discard)) return;
+        $.ajax({url:'/api/devicemonitor/devices/discardqueue',type:'POST',success:function(r){
+            var ok = r && r.result === 'discarded';
+            showToast(ok ? translations.queue_discarded : translations.queue_error, !ok ? 'error' : 'success');
+            loadQueue();
+        }});
+    });
 
     // VLAN multi-select dropdown
     function buildVlanDropdown(vlans) {
@@ -295,23 +385,35 @@ $(document).ready(function() {
             return;
         }
         rows.forEach(function(row) {
+            // Built as DOM nodes on purpose. hostname comes from a DHCP
+            // reservation description, a Dnsmasq override or the rename box,
+            // none of which are escaped anywhere on the way in, so string
+            // concatenation into .html() would execute whatever it contains.
             var statusHtml = row.status==='online'
                 ? '<span style="color:#4CAF50;font-weight:bold;white-space:nowrap;"><i class="fa fa-circle"></i> ONLINE</span>'
                 : '<span style="color:#666;font-weight:bold;white-space:nowrap;"><i class="fa fa-circle-o"></i> OFFLINE</span>';
 
-            var hn = row.hostname || '';
-            var hostnameHtml = '<span class="hostname-display" data-mac="'+row.mac+'"'
-                +' title="'+translations.click_to_rename+'"'
-                +' style="cursor:pointer;border-bottom:1px dashed #666;">'
-                +(hn||'<em style="color:#555;">'+translations.unnamed+'</em>')
-                +' <i class="fa fa-pencil" style="opacity:.45;font-size:11px;"></i></span>';
+            var $hostname = $('<span class="hostname-display">')
+                .attr({'data-mac': row.mac||'', 'data-hostname': row.hostname||'',
+                       title: translations.click_to_rename})
+                .css({cursor:'pointer','border-bottom':'1px dashed #666'});
+            if (row.hostname) {
+                $hostname.text(row.hostname);
+            } else {
+                $hostname.append($('<em>').css('color','#555').text(translations.unnamed));
+            }
+            $hostname.append(' ', $('<i class="fa fa-pencil">').css({opacity:.45,'font-size':'11px'}));
 
-            var ipHtml = row.ip
-                ? '<a href="http://'+row.ip+'" target="_blank" style="color:#5bc0de;">'+row.ip+'</a>'
-                : '';
+            var $ip = $('<td>');
+            if (row.ip) {
+                // The scheme is fixed here, so the address cannot introduce one.
+                $ip.append($('<a>').attr({href:'http://'+row.ip, target:'_blank'})
+                    .css('color','#5bc0de').text(row.ip));
+            }
             if (Number(row.is_reserved)) {
-                ipHtml += ' <span class="label label-info" style="font-size:10px;" title="'
-                    + translations.reserved_hint + '">' + translations.reserved + '</span>';
+                $ip.append(' ', $('<span class="label label-info">')
+                    .css('font-size','10px').attr('title', translations.reserved_hint)
+                    .text(translations.reserved));
             }
 
             var vlanLabel = row.vlan||'';
@@ -319,21 +421,32 @@ $(document).ready(function() {
 
             $('<tr>').append(
                 $('<td>').text(row.mac||''),
-                $('<td>').html(ipHtml),
-                $('<td>').html(hostnameHtml),
+                $ip,
+                $('<td>').append($hostname),
                 $('<td>').text(row.vendor||''),
                 $('<td>').text(vlanLabel),
                 $('<td>').html(statusHtml),
                 $('<td>').text(row.last_seen||''),
-                $('<td>').html('<button class="btn btn-xs btn-warning command-check" data-row-mac="'+row.mac+'" data-row-ip="'+row.ip+'" title="Check online" style="margin-right:2px;"><i class="fa fa-plug"></i></button>' +
-                '<button class="btn btn-xs btn-danger command-delete" data-row-mac="'+row.mac+'"><i class="fa fa-trash"></i></button>')
+                $('<td>').append(
+                    $('<button class="btn btn-xs btn-warning command-check">')
+                        .attr({'data-row-mac': row.mac||'', 'data-row-ip': row.ip||'',
+                               title: 'Check online'})
+                        .css('margin-right','2px')
+                        .append($('<i class="fa fa-plug">')),
+                    $('<button class="btn btn-xs btn-danger command-delete">')
+                        .attr('data-row-mac', row.mac||'')
+                        .append($('<i class="fa fa-trash">'))
+                )
             ).appendTo($tbody);
         });
-        bindButtons();
     }
 
-    // Načtení dat
-    function loadDevices() {
+    // Načtení dat. force=true re-renders even while a rename is open,
+    // which is what the rename itself needs once it has saved.
+    function loadDevices(force) {
+        if (!force && $('#grid-devices tbody input').length) {
+            return;
+        }
         $.ajax({url:'/api/devicemonitor/devices/search',type:'POST',
             data:{rowCount:-1,current:1,searchPhrase:''},
             success:function(data){
@@ -346,59 +459,60 @@ $(document).ready(function() {
         });
     }
 
-    function bindButtons() {
-        $('.command-delete').off('click').on('click',function(){
-            var mac=$(this).data('row-mac');
-            if (!confirm(translations.confirm_delete+' '+mac+'?')) return;
-            $.ajax({url:'/api/devicemonitor/devices/delete',type:'POST',data:{mac:mac},
-                success:function(r){
-                    showToast(r.result==='deleted'?translations.deleted:translations.delete_error,
-                              r.result==='deleted'?'success':'error');
-                    loadDevices(); loadStats();
-                }
-            });
-        });
-
-        $('.command-check').off('click').on('click', function() {
-            var mac = $(this).data('row-mac');
-            var ip  = $(this).data('row-ip');
-            var $btn = $(this);
-
-            if (!ip) {
-                showToast('No IP address for this device', 'error');
-                return;
+    // Delegated: the table is rebuilt every 30 seconds, and rebinding a
+    // handler per row on each render is pure waste.
+    $(document).on('click', '.command-delete', function(){
+        var mac=$(this).data('row-mac');
+        if (!confirm(translations.confirm_delete+' '+mac+'?')) return;
+        $.ajax({url:'/api/devicemonitor/devices/delete',type:'POST',data:{mac:mac},
+            success:function(r){
+                showToast(r.result==='deleted'?translations.deleted:translations.delete_error,
+                          r.result==='deleted'?'success':'error');
+                loadDevices(true); loadStats();
             }
-
-            $btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i>');
-
-            $.ajax({
-                url: '/api/devicemonitor/devices/pingdevice',
-                type: 'POST',
-                data: { mac: mac, ip: ip },
-                success: function(r) {
-                    $btn.prop('disabled', false).html('<i class="fa fa-plug"></i>');
-                    if (r.result === 'online') {
-                        showToast(ip + ' ONLINE', 'success');
-                    } else if (r.result === 'offline') {
-                        showToast(ip + ' OFFLINE', 'error');
-                    }
-                    loadDevices();
-                },
-                error: function() {
-                    $btn.prop('disabled', false).html('<i class="fa fa-plug"></i>');
-                    showToast('Ping failed', 'error');
-                }
-            });
         });
-    }
+    });
+
+    $(document).on('click', '.command-check', function() {
+        var mac = $(this).data('row-mac');
+        var ip  = $(this).data('row-ip');
+        var $btn = $(this);
+
+        if (!ip) {
+            showToast('No IP address for this device', 'error');
+            return;
+        }
+
+        $btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i>');
+
+        $.ajax({
+            url: '/api/devicemonitor/devices/pingdevice',
+            type: 'POST',
+            data: { mac: mac, ip: ip },
+            success: function(r) {
+                $btn.prop('disabled', false).html('<i class="fa fa-plug"></i>');
+                if (r.result === 'online') {
+                    showToast(ip + ' ONLINE', 'success');
+                } else if (r.result === 'offline') {
+                    showToast(ip + ' OFFLINE', 'error');
+                }
+                loadDevices(true);
+            },
+            error: function() {
+                $btn.prop('disabled', false).html('<i class="fa fa-plug"></i>');
+                showToast('Ping failed', 'error');
+            }
+        });
+    });
 
     // Inline editace hostname
     $(document).on('click','.hostname-display',function(){
         var $span=$(this);
         if ($span.find('input').length) return;
         var mac=$span.data('mac');
-        var cur=$span.text().trim();
-        if (cur==='\u2014') cur='';
+        // The stored value, not the rendered text: an unnamed device shows
+        // the placeholder word, which used to be saved as its hostname.
+        var cur=$span.attr('data-hostname')||'';
         var $inp=$('<input type="text" class="form-control input-sm">').val(cur).css({width:'150px',display:'inline-block'});
         $span.html($inp);
         $inp.focus().select();
@@ -408,13 +522,13 @@ $(document).ready(function() {
                 success:function(r){
                     showToast(r.result==='saved'?translations.hostname_saved:translations.hostname_error,
                               r.result==='saved'?'success':'error');
-                    loadDevices();
+                    loadDevices(true);
                 }
             });
         }
         $inp.on('keydown',function(e){
             if(e.key==='Enter') save();
-            if(e.key==='Escape') loadDevices();
+            if(e.key==='Escape') loadDevices(true);
         }).on('blur',function(){ setTimeout(save,150); });
     });
 
@@ -434,7 +548,7 @@ $(document).ready(function() {
     $('#filter-status').on('change',function(){ activeStatus=$(this).val(); applyFilters(); });
     $('#filter-reserved').on('change',function(){ activeReserved=$(this).val(); applyFilters(); });
 
-    $('#btn-refresh').on('click',function(){ loadDevices(); loadStats(); });
+    $('#btn-refresh').on('click',function(){ loadDevices(true); loadStats(); });
 
     $('#btn-scan-now').on('click', function() {
         var $btn = $(this);
@@ -525,6 +639,7 @@ $(document).ready(function() {
         error:function(){ loadDevices(); }
     });
     loadStats();
-    setInterval(function(){ loadDevices(); loadStats(); },30000);
+    loadQueue();
+    setInterval(function(){ loadDevices(); loadStats(); loadQueue(); },30000);
 });
 </script>
