@@ -419,7 +419,9 @@ HTML;
                 $ip = htmlspecialchars($d['ip'] ?? 'No IP');
                 $hostname_val = htmlspecialchars($d['hostname'] ?? 'Unknown');
                 $vlan = htmlspecialchars(\OPNsense\DeviceMonitor\DeviceMonitor::describeInterface($d['vlan'] ?? ''));
-                $first_seen = htmlspecialchars($d['first_seen']);
+                $first_seen = htmlspecialchars(
+                    \OPNsense\DeviceMonitor\DeviceMonitor::displayTime($d['first_seen'] ?? '')
+                );
                 
                 $html .= <<<ROW
                     <tr>

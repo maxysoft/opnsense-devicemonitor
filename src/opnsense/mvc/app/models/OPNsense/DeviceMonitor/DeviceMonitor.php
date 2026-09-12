@@ -238,6 +238,23 @@ class DeviceMonitor
      * Získání všech zařízení z databáze
      * @return array Seznam zařízení (upravený podle konfigurace)
      */
+    /**
+     * Render a timestamp written by the scanner in the firewall's timezone.
+     *
+     * The scanner stores UTC, while PHP here runs with date.timezone set from
+     * System > Settings > General, so parsing without saying UTC reads the
+     * value as local time and shifts every display by the local offset.
+     */
+    public static function displayTime($value, $format = 'd.m.Y - H:i:s')
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '';
+        }
+        $timestamp = strtotime($value . ' UTC');
+        return $timestamp === false ? $value : date($format, $timestamp);
+    }
+
     public function getDevices()
     {
         $devices = [];
@@ -273,13 +290,15 @@ class DeviceMonitor
                     }
                 }
 
+                // Sorting has to use the instant, not the rendered string:
+                // "29.12.2025 - 18:37:51" sorts by day of month first, which
+                // put the list in the wrong order by default.
+                $row['last_seen_ts'] = !empty($row['last_seen'])
+                    ? (int)strtotime($row['last_seen'] . ' UTC') : 0;
+
                 // Formátuj datum do českého formátu: 29.12.2025 - 18:37:51
-                if (!empty($row['last_seen'])) {
-                    $timestamp = strtotime($row['last_seen']);
-                    if ($timestamp !== false) {
-                        $row['last_seen'] = date('d.m.Y - H:i:s', $timestamp);
-                    }
-                }
+                $row['last_seen'] = self::displayTime($row['last_seen'] ?? '');
+                $row['first_seen'] = self::displayTime($row['first_seen'] ?? '');
                 
                 $devices[] = $row;
             }

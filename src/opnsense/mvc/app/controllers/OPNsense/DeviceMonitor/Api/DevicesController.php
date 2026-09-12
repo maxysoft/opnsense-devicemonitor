@@ -321,7 +321,8 @@ class DevicesController extends ApiControllerBase
                             'event' => (string)$row['event'],
                             'devices' => count($macs),
                             'macs' => implode(', ', array_slice($macs, 0, 5)),
-                            'created_at' => (string)($row['created_at'] ?? ''),
+                            'created_at' => DeviceMonitor::displayTime(
+                                $row['created_at'] ?? '', 'Y-m-d H:i:s'),
                         ];
                     }
 

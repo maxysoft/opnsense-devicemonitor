@@ -352,6 +352,15 @@ $(document).ready(function() {
                 return 0;
             }
 
+            // Chronological, not alphabetical: the displayed date starts
+            // with the day of the month.
+            if (sortCol === 'last_seen') {
+                var ta = Number(a.last_seen_ts||0), tb = Number(b.last_seen_ts||0);
+                if (ta === tb) return 0;
+                var cmpTime = ta < tb ? -1 : 1;
+                return sortDir === 'asc' ? cmpTime : -cmpTime;
+            }
+
             // Numerické řazení pro MAC adresu (hex)
             if (sortCol === 'mac') {
                 var ma = va.replace(/:/g,'').toLowerCase();
