@@ -1,378 +1,136 @@
 # OPNsense Device Monitor
 
-**[🇨🇿 Czech version](README_CZ.md)** | **[👨‍💻 More projects by the author](https://github.com/hacesoft?tab=repositories)**
+**[🇨🇿 Česky](README_CZ.md)**
 
----
+Tracks the devices on your network from OPNsense's own host discovery database
+and notifies you when one appears, comes online or goes offline.
 
-Plugin for automatic network device monitoring in OPNsense firewall. Detects new devices on the network using the native OPNsense hostwatch database and sends email or webhook notifications.
+Fork of [hacesoft/opnsense-devicemonitor](https://github.com/hacesoft/opnsense-devicemonitor),
+packaged as an installable OPNsense plugin.
 
-> **AI disclaimer.** Parts of this fork, including the packaging and some
+> **AI disclaimer.** Parts of this fork, including the packaging and several
 > features, were written with AI assistance and reviewed by a human before
-> release. It runs on a firewall, so treat it as you would any third-party
-> plugin: read the code, test it somewhere you can afford to break, and report
-> anything that looks wrong.
+> release. It runs on a firewall: read the code, test it where you can afford to
+> break things, and report anything that looks wrong.
 
----
+## Contents
 
-## 📋 Table of Contents
-
-- [What the plugin does](#what-the-plugin-does)
-- [Version history](#version-history)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
-- [Plugin structure](#plugin-structure)
-- [How the daemon works](#how-the-daemon-works)
+- [How it works](#how-it-works)
+- [Files and endpoints](#files-and-endpoints)
 - [Troubleshooting](#troubleshooting)
-- [Uninstallation](#uninstallation)
-
----
-
-## What the plugin does
-
-The plugin automatically monitors the network and alerts you about:
-
-- 🆕 **New devices** connecting to the network
-- 📊 **Device history** with first/last detection timestamps
-- 📧 **Email notifications** with professional HTML design
-- 🔔 **Webhook notifications** (ntfy.sh, Discord, Apprise, custom)
-- 🖥️ **Dashboard widget** on the OPNsense Lobby page
-
----
-
-## Version history
-
-### v2.3 (August 2026) — Direct SMTP and notification improvements
-
-- Added selectable **Email delivery method** in Device Monitor settings.
-- **Local Sendmail / Postfix** remains the default and preserves existing installations.
-- Added built-in **Direct SMTP** delivery using Python `smtplib`; no additional Python package is required.
-- Direct SMTP supports **STARTTLS**, **SSL/TLS**, and unencrypted SMTP.
-- Added SMTP server, port, username and password configuration to the UI.
-- **Test Email** now uses the currently selected delivery method.
-- Existing configuration files are merged with new defaults automatically, so upgrading does not require a configuration reset.
-- SMTP credentials are read from the protected Device Monitor configuration instead of being passed on the process command line.
-- Configuration containing SMTP credentials is stored with restrictive file permissions.
-- Includes the v2.2 Hostwatch fixes: newest Hostwatch record is selected per MAC, deleted devices no longer return from historical records, VLAN notification filtering was corrected, and real Hostwatch `last_seen` values are preserved during quick status updates.
-
-v2.1 (April 2026) — Dnsmasq hostname support
-What changed and why
-1. Dnsmasq hostname resolution — `get_dnsmasq_descriptions()`
-OPNsense users who migrated from the deprecated ISC DHCPv4 to Dnsmasq DNS & DHCP (the recommended replacement as of OPNsense 25.7+) had empty hostnames in Device Monitor. The previous code only read hostnames from `config.xml → dhcpd` (ISC DHCP static mappings).
-A new function reads hostname data from the Dnsmasq Host Overrides section of `config.xml`. The correct XML structure for Dnsmasq entries is:
-```xml
-<hosts uuid="...">
-  <host>MyDevice</host>          ← hostname field
-  <hwaddr>aa:bb:cc:dd:ee:ff</hwaddr>  ← MAC address (note: hwaddr, NOT hw)
-  <ip>192.168.1.100</ip>
-  <descr>My Device Description</descr>
-</hosts>
-```
-> ⚠️ The MAC address field is `<hwaddr>` — not `<hw>` as one might expect. This was confirmed by inspecting a live `config.xml`.
-2. ISC DHCP disabled interfaces are now skipped
-When an ISC DHCP interface is disabled (checkbox unchecked in the UI), OPNsense sets no `<enable>` child element inside that interface's config block. The updated `get_dhcp_descriptions()` function skips any ISC interface that lacks the `<enable>` tag, preventing stale data from disabled interfaces from appearing as hostnames.
-3. Hostname source priority
-Hostname resolution now follows a clear priority chain:
-```
-1. custom_hostname  (manually set in Device Monitor UI — highest priority)
-2. Dnsmasq          (Host Overrides with MAC → hostname mapping)
-3. ISC DHCP         (static mappings, hostname field preferred over descr)
-```
-Dnsmasq overwrites ISC data for the same MAC address via `dict.update()`:
-```python
-dhcp_descriptions = get_dhcp_descriptions()     # ISC DHCP (enabled interfaces only)
-dnsmasq_descriptions = get_dnsmasq_descriptions()  # Dnsmasq Host Overrides
-dhcp_descriptions.update(dnsmasq_descriptions)  # Dnsmasq wins on conflict
-```
-4. Hostname field preference within ISC DHCP
-Previously, the ISC DHCP reader used only `<descr>` (the description/note field). It now prefers `<hostname>` and falls back to `<descr>` only when `<hostname>` is absent or empty. This matches how hostnames actually appear in DNS and DHCP lease tables.
-
-
-### v2.0 (April 2026) — Major overhaul
-
-This version is a complete architectural rewrite focused on deep integration with OPNsense 26.x. Many components that were previously custom-built are now replaced by native OPNsense mechanisms.
-
-#### What changed and why
-
-**1. Service registration — `plugins.inc.d/devicemonitor.inc`**
-
-In previous versions, the daemon was completely invisible to OPNsense. It did not appear in *System → Diagnostics → Services*, so there was no way to start/stop/restart it from the GUI.
-
-The fix is a new file `src/etc/inc/plugins.inc.d/devicemonitor.inc` which registers the service using OPNsense's native `plugins_services()` mechanism.
-
-```php
-function devicemonitor_services()
-{
-    $services = [];
-    $services[] = [
-        'description' => gettext('Device Monitor - network device tracking'),
-        'configd' => [
-            'restart' => ['devicemonitor restart'],
-            'start'   => ['devicemonitor start'],
-            'stop'    => ['devicemonitor stop'],
-        ],
-        'name'    => 'devicemonitor',
-        'pidfile' => '/var/run/devicemonitor.pid',
-    ];
-    return $services;
-}
-```
-
-**2. Daemon status check — `daemon_status.sh`**
-
-The previous approach used `service devicemonitor status` in the configd `[status]` action. On FreeBSD, this command returns exit code 1 even when the service is running normally (it returns 1 = "not managed by rc.d in the traditional sense"). Because configd type `script_output` treats any non-zero exit as an error, every status check produced `Execute error`.
-
-The fix is a dedicated shell script that checks the pidfile directly:
-
-```sh
-#!/bin/sh
-PIDFILE="/var/run/devicemonitor.pid"
-if [ -f "$PIDFILE" ]; then
-    PID=$(cat "$PIDFILE")
-    if kill -0 "$PID" 2>/dev/null; then
-        echo "running"
-        exit 0
-    fi
-    rm -f "$PIDFILE"   # stale pidfile cleanup
-fi
-echo "stopped"
-exit 0
-```
-
-**3. `actions_devicemonitor.conf` — `|| true` on start/stop/restart**
-
-Without `|| true`, if the daemon was already running and configd tried to start it again, `service devicemonitor start` returned a non-zero exit code (daemon already running), which configd interpreted as an error and showed `Error (1)`. Adding `|| true` ensures configd always sees success.
-
-The `[status]` action now calls `daemon_status.sh` instead of `service devicemonitor status`.
-
-**4. `rc.d/devicemonitor` — added `procname`, fixed default**
-
-Two fixes:
-- Default changed from `"YES"` to `"NO"` — FreeBSD convention: the script itself must default to disabled; activation is done by `/etc/rc.conf.d/devicemonitor`
-- Added `procname="/usr/local/bin/python3"` — without this, `rc.d` cannot find the running process and every `start` creates a new zombie process. 
-
-**5. `service.xml` — fixed tag name, added `<pidfile>`, fixed `<commands>`**
-
-Three bugs in one file:
-- `<n>DeviceMonitor</n>` → `<name>DeviceMonitor</name>` — OPNsense did not recognize the `<n>` tag
-- Added `<pidfile>/var/run/devicemonitor.pid</pidfile>` — needed for the green/red status dot
-- `<commands>` changed from shell commands (`service devicemonitor start`) to configd action names (`devicemonitor start`)
-
-**6. `ServiceController.php` — start/stop/restart via `configdRun()`**
-
-Previously, the PHP API controller called `exec('service devicemonitor start')` directly. This bypasses OPNsense's privilege model. All service control now goes through `$backend->configdRun('devicemonitor start')`.
-
-**7. Dashboard widget — fixed detached DOM issue**
-
-The widget's `onWidgetTick()` method was updating `this.$container.find('.dm-total')`. However, OPNsense's widget framework copies the markup into the DOM rather than inserting the original jQuery object, so `this.$container` pointed to a detached element — `.find()` worked silently but changes were never visible on screen.
-
-Fixed by giving each element a unique `id` and selecting directly from the document:
-
-```javascript
-// Before (broken — updates detached element)
-this.$container.find('.dm-total').text(stats.total);
-
-// After (correct — selects from live DOM)
-$('#dm-total').text(stats.total);
-```
-
-Also fixed: the widget was calling `/api/devicemonitor/service/status` for device counts (which returns daemon status, not stats). It now correctly calls `/api/devicemonitor/devices/stats`.
-
-**8. `install.sh` — complete rewrite**
-
-Key changes:
-- Zombie process cleanup before daemon start (`pkill -f monitor_daemon.py`)
-- Daemon started via `configctl devicemonitor start` instead of `service devicemonitor start`
-- Daemon verified via pidfile + `kill -0` instead of `service devicemonitor status`
-- Removed broken `service php-fpm restart` and `configctl webgui restart` calls
-- Added `plugins.inc.d/devicemonitor.inc` installation step
-- Fixed step numbering (was `[6/11]` followed by `[6/10]`)
-
-**9. `uninstall.sh` — fixed daemon stop**
-
-Previously used `service devicemonitor status` which returned exit 1, causing the stop to fail. Now uses `pkill -f monitor_daemon.py` which always works regardless of pidfile state.
-
-Also removed broken `configctl webgui restart` and `service php-fpm restart` calls — these are either not available or unnecessary on OPNsense 26.x.
-
----
-
-### v1.x (January 2026)
-
-- **OPNsense 26.x compatibility fix:** Removed `$this->sessionClose()` calls from controllers. This function was removed in OPNsense 26.0 and caused crashes when called. Added automatic version detection to maintain backward compatibility with 25.x.
-
----
+- [Uninstalling](#uninstalling)
+- [Credits](#credits)
 
 ## Features
 
-### 🎯 Core features
-
-✅ **Device discovery** via OPNsense hostwatch SQLite database (`/var/db/hostwatch/hosts.db`)
-✅ **Email notifications** — professional HTML emails with inline CSS
-✅ **Webhook notifications** — ntfy.sh, Discord, Apprise, custom HTTP POST endpoints
-✅ **Delivery retries** — a notification is queued until the endpoint accepts it
-✅ **Device history** — first/last detection timestamps
-✅ **Vendor lookup** — manufacturer from MAC address (IEEE OUI database)
-
-### 🖥️ Web interface
-
-✅ **Dashboard widget** — shows total/online device count and daemon status on Lobby page
-✅ **Device list** — searchable, sortable table with delete actions
-✅ **Settings page** — all configuration in one place with test buttons
-✅ **Service control** — visible in *System → Diagnostics → Services* with start/stop/restart buttons
-
-### 📊 Technical
-
-✅ **SQLite database** — fast storage, no external database needed
-✅ **Background daemon** — Python process managed by FreeBSD rc.d
-✅ **configd integration** — all service actions go through OPNsense configd
-✅ **Logging** — `/var/log/devicemonitor.log`
-
----
+- Device discovery from OPNsense hostwatch (`/var/db/hostwatch/hosts.db`)
+- Email notifications over local sendmail or direct SMTP
+- Webhook notifications: ntfy, Discord, Apprise API, or generic JSON
+- Queued delivery: a notification that fails is retried until it is accepted
+- Events for new devices, and for devices going offline and coming back
+- Per-interface filtering, independently for the scanner, email and webhooks
+- Reserved (DHCP) and new-device badges, custom names, CSV export
+- Lobby dashboard widget, and service control under Diagnostics → Services
 
 ## Requirements
 
-- **OPNsense 26.1.5 or newer**
-- **SSH access** (System → Settings → Administration → Secure Shell)
-- **Root account** or admin with CLI access
-
-> ⚠️ Versions prior to 26.1.5 are not supported. The plugin uses APIs and mechanisms introduced in 26.x.
-
----
+OPNsense 26.1.5 or newer. Earlier versions lack APIs the plugin uses.
 
 ## Installation
 
-### Method 1: Plugin repository (recommended)
+Add the repository once, as root over SSH:
 
-Installs Device Monitor as a real OPNsense plugin, visible under **System → Firmware → Plugins**, with updates handled by the firmware updater.
-
-**Step 1:** Add the repository once, as root over SSH:
 ```bash
-fetch -o /usr/local/etc/pkg/repos/mxy-opnsense-repo.conf https://maxysoft.github.io/opnsense-repo/mxy-opnsense-repo.conf
+fetch -o /usr/local/etc/pkg/repos/mxy-opnsense-repo.conf \
+  https://maxysoft.github.io/opnsense-repo/mxy-opnsense-repo.conf
 pkg update
 ```
 
-**Step 2:** Install it — in the GUI under **System → Firmware → Plugins**, search for `os-devicemonitor` and press **+**. Or from the shell:
+Then install from **System → Firmware → Plugins** (search `os-devicemonitor`),
+or from the shell:
+
 ```bash
 pkg install os-devicemonitor
 ```
 
-Update with `pkg upgrade os-devicemonitor` or from **System → Firmware → Updates**. Remove with `pkg remove os-devicemonitor`; the device database in `/var/db/devicemonitor` is kept.
+Upgrade with `pkg upgrade os-devicemonitor`, remove with `pkg remove
+os-devicemonitor`. The database in `/var/db/devicemonitor` survives removal.
 
-> Already installed via `install.sh`? Run `sh uninstall.sh` first (it preserves the database), then install the package. Otherwise the old, unmanaged copies of the files stay behind and `pkg remove` will not clean them up.
+To install or roll back to a specific version, take the asset from a
+[release](https://github.com/maxysoft/opnsense-repo/releases):
+
+```bash
+pkg add -f https://github.com/maxysoft/opnsense-repo/releases/download/v2.9.2/os-devicemonitor-2.9.2-FreeBSD_15_amd64.pkg
+```
+
+Use the `FreeBSD_14_amd64` asset on OPNsense 26.1. `pkg upgrade` moves it
+forward again unless you `pkg lock os-devicemonitor`.
 
 Repository source: [maxysoft/opnsense-repo](https://github.com/maxysoft/opnsense-repo)
 
----
-
-### Method 2: WinSCP + SSH
-
-**Step 1:** Download the latest release ZIP from [Release](../../tree/main/release).
-
-**Step 2:** Enable SSH on OPNsense:
-```
-System → Settings → Administration → Secure Shell → Enable
-```
-
-**Step 3:** Upload via WinSCP to `/tmp/` on OPNsense.
-
-**Step 4:** Connect via SSH and install:
-```bash
-cd /tmp
-unzip opnsense-devicemonitor*.zip
-cd opnsense-devicemonitor
-sh install.sh
-```
-
-No reboot required. The install script handles everything.
-
----
-
-### Method 3: Direct SSH
-
-```bash
-ssh root@your.opnsense.ip
-cd /tmp
-fetch https://github.com/maxysoft/opnsense-devicemonitor/releases/latest/download/opnsense-devicemonitor.zip
-unzip opnsense-devicemonitor.zip
-cd opnsense-devicemonitor
-sh install.sh
-```
-
----
-
-### What install.sh does
-
-1. Checks OPNsense version (minimum 26.1.5)
-2. Runs `uninstall.sh --silent` if an old installation is detected (preserves database)
-3. Creates all required directories
-4. Copies RC script and registers the service in `plugins.inc.d`
-5. Installs the dashboard widget
-6. Compiles translation files
-7. Copies MVC controllers, models, views
-8. Copies Python, shell, and PHP scripts
-9. Copies configd actions
-10. Kills any zombie daemon processes, starts fresh via `configctl devicemonitor start`
-
----
+> Installed with `install.sh` from an older release? Run `sh uninstall.sh`
+> first, then install the package, or the unmanaged copies stay behind.
 
 ## Configuration
 
-Go to: **Services → DeviceMonitor → Settings**
+Everything is under Services → Device Monitor → Settings.
 
-### Basic
-
-| Setting | Description |
-|---------|-------------|
-| Enable Device Monitor | Enable/disable scanning |
-| Scan Interval | How often to scan (5–30 minutes) |
-
-### Email notifications
-
-Device Monitor offers two independent email delivery methods:
-
-- **Local Sendmail / Postfix** — the default and backward-compatible method. It uses `/usr/local/sbin/sendmail`, so a working local mail transport such as the OPNsense `os-postfix` plugin must be configured.
-- **Direct SMTP (built into Device Monitor)** — connects directly to the configured SMTP server using Python `smtplib`, without requiring Postfix or Monit for message delivery.
+### General
 
 | Setting | Description |
 |---------|-------------|
-| Enable Email | Enable email notifications |
-| Email (To) | Recipient address |
-| Email (From) | Sender address |
-| Email delivery method | Select Local Sendmail/Postfix or Direct SMTP |
-| SMTP Server | SMTP hostname or IP address (Direct SMTP only) |
-| SMTP Port | SMTP port, typically 587 for STARTTLS or 465 for SSL/TLS |
-| Encryption | STARTTLS, SSL/TLS, or None |
-| SMTP Username | Optional SMTP authentication username |
-| SMTP Password | Optional SMTP authentication password |
-| Test Email | Save the current settings and test the selected delivery method |
+| Enable Device Monitor | Runs the scanner daemon |
+| Scan interval | Seconds between scans |
+| Log level | `info`, or `debug` for per-notification detail |
+| Monitor interfaces | Limit scanning to these interfaces; empty means all |
+| Notify on | Which events raise a notification: new, online, offline |
 
-Existing installations continue to use **Local Sendmail / Postfix** after upgrading unless Direct SMTP is explicitly selected.
+### Email
 
-### Webhook notifications
+Two delivery methods. **Local sendmail** uses `/usr/local/sbin/sendmail` and
+needs a working local transport such as `os-postfix`. **Direct SMTP** talks to a
+server itself through Python `smtplib` and needs nothing else installed.
 
 | Setting | Description |
 |---------|-------------|
-| Enable Webhook | Enable webhook notifications |
-| Webhook URL | Target URL |
-| Test Webhook | Send a test payload |
+| Enable email | Turns the channel on |
+| To / From | Recipient and sender addresses |
+| Delivery method | Local sendmail or direct SMTP |
+| SMTP server, port, encryption | STARTTLS, SSL/TLS or none |
+| SMTP username, password | Optional authentication |
+| Email: notify for interfaces | Limit this channel to these interfaces |
+| Test email | Saves the settings, then sends through the selected method |
 
-**Supported webhook types:**
+### Webhook
 
-- **ntfy.sh** — `https://ntfy.sh/yourSecretTopic`
+| Setting | Description |
+|---------|-------------|
+| Enable webhook | Turns the channel on |
+| Webhook type | Payload format; set it explicitly |
+| Webhook URL | Target endpoint |
+| Skip TLS verification | Last resort, see [TLS](#tls) |
+| Webhook: notify for interfaces | Limit this channel to these interfaces |
+| Test webhook | Saves the settings, then sends a test payload |
+
+Supported types:
+
+- **ntfy** — `https://ntfy.sh/yourSecretTopic`
 - **Discord** — `https://discord.com/api/webhooks/...`
 - **Apprise API** — `http://apprise.lan:8000/notify/opnsense`
-- **Generic** — any HTTP POST endpoint receiving JSON
+- **Generic JSON** — any endpoint that accepts a POST
 
-Set **Webhook type** explicitly. Detection from the URL is only a fallback and
-guesses wrong for a self-hosted ntfy on a hostname that does not say so.
+Detection from the URL is only a fallback and guesses wrong for a self-hosted
+ntfy on a hostname that does not say so.
 
 #### Apprise
 
 [Apprise API](https://github.com/caronc/apprise-api) forwards one notification
-to any of its 100+ services, so the targets live there instead of in this
-plugin. Run it next to whatever else you self-host:
+to any of its services, so the targets live there rather than in this plugin:
 
 ```yaml
 services:
@@ -388,273 +146,171 @@ services:
       APPRISE_ADMIN: "y"
 ```
 
-Open `http://<host>:8000/`, choose a key such as `opnsense`, and paste the
-target URLs (`ntfys://ntfy.example.com/topic`, `discord://...`, `mailto://...`).
-Point **Webhook URL** at `http://<host>:8000/notify/opnsense`.
-
-The plugin posts `{"title": ..., "body": ..., "type": ..., "format": "markdown"}`,
-where `type` is `info` for a new device, `success` for one coming online and
-`warning` for one going offline.
+Open `http://<host>:8000/`, pick a key such as `opnsense`, paste the target URLs
+(`ntfys://ntfy.example.com/topic`, `discord://...`, `mailto://...`), and point
+**Webhook URL** at `http://<host>:8000/notify/opnsense`. The plugin posts
+`{"title", "body", "type", "format"}`, where `type` is `info` for a new device,
+`success` for one coming online and `warning` for one going offline.
 
 Apprise API has no authentication of its own, by design, and its stored
 configuration holds your tokens in plaintext. Keep it on the LAN, or put basic
-authentication in front of it as its README documents.
+authentication in front of it.
 
 #### Delivery and retries
 
-A notification whose delivery fails is not lost. The event is queued, and the
-queue is retried as a whole on one schedule: 30s, 30s, 1m, 3m, 5m, 10m, 30m,
-then hourly for as long as it takes. Retries keep running while monitoring is
-switched off, so nothing is stranded by disabling the scanner.
+A failed delivery is not lost. The event is queued, and the queue is retried as
+a whole: 30s, 30s, 1m, 3m, 5m, 10m, 30m, then hourly for as long as it takes.
+Retries continue while monitoring is switched off.
 
 Everything queued for the same channel and event is merged into one message, so
-an endpoint that was unreachable for a day produces a single "device went
-offline" notification listing every device rather than one per scan.
+an endpoint that was unreachable for a day produces a single notification
+listing every device rather than one per scan.
 
-The Devices page shows a **Pending notifications** panel whenever the queue is
-not empty: what failed, when the next attempt is due, and buttons to retry at
-once or discard the backlog. Switching a channel off discards its queued
-notifications, which is recorded in `/var/log/devicemonitor.log`.
+The Devices page shows a **Pending notifications** panel while the queue is not
+empty, with the failure reason, the time of the next attempt, and buttons to
+retry now or discard. Switching a channel off discards its queue, which is
+recorded in the log.
 
 #### TLS
 
-Certificates issued by a CA of this firewall are trusted automatically: OPNsense
-writes everything from **System > Trust > Authorities** into the system trust
+A certificate issued by a CA of this firewall is trusted automatically:
+everything under **System → Trust → Authorities** is written to the system trust
 store, and the plugin verifies against it. **Skip TLS verification** is only for
-an endpoint whose certificate cannot be verified at all — it exposes the webhook
-URL, which is usually itself the credential, to anyone on the path.
-
----
+an endpoint that cannot be verified at all — it exposes the webhook URL, which
+is usually itself the credential, to anyone on the path.
 
 ## Usage
 
-### How the online status is determined
+### Devices page
 
-The device list follows OPNsense's own host discovery (hostwatch), which records
-a device whenever it is seen on the network, from ARP, NDP, DHCP or DNS. A
-device counts as online when it was seen within the last 15 minutes, so nothing
-depends on it answering a ping.
+Services → Device Monitor → Devices.
 
-The **Check online** button on a row does not rely on ICMP either. It sends one
-probe so the firewall resolves the address, then looks the device up in the
-ARP/NDP neighbour table — the same signal the DHCP leases pages use for their
-own online column. A device that drops pings still has to answer ARP for any
-traffic to reach it, so it is reported correctly.
+Columns are MAC, IP, hostname, vendor, interface, status and last seen. A
+**NEW** badge marks a device first seen in the last 24 hours, **RESERVED** marks
+a MAC with a DHCP reservation. Click a hostname to give the device your own
+name. The toolbar filters by interface, status and reservation, runs a scan, and
+exports the current view to CSV.
 
-### Lobby dashboard widget
+### Online status
 
-After installation, add the **Device Monitor** widget to the Lobby dashboard. It shows:
-- Daemon status (Running / Stopped)
-- Total device count
-- Online device count
+The list follows hostwatch, which records a device whenever it is seen on the
+network through ARP, NDP, DHCP or DNS. A device counts as online when it was
+seen in the last 15 minutes, so nothing depends on it answering a ping.
 
-### Device list
+The **Check online** button does not rely on ICMP either. It sends one probe so
+the firewall resolves the address, then looks the device up in the ARP/NDP
+neighbour table — the signal the DHCP leases pages use for their own online
+column. A device that drops pings still has to answer ARP.
 
-**Services → DeviceMonitor → Devices**
+Devices behind a router do not appear in that table; only directly attached
+segments do.
 
-Columns: MAC, Vendor, IP, Hostname, First Seen, Last Seen, Actions
+### Elsewhere in the GUI
 
-### Service control
+- **Lobby dashboard** — add the Device Monitor widget for daemon status and device counts
+- **System → Diagnostics → Services** — start, stop and restart the daemon
+- `/var/log/devicemonitor.log` — rotated by newsyslog at 1 MB, 7 generations
 
-**System → Diagnostics → Services → devicemonitor**
-
-Start, stop, restart the daemon directly from the GUI. The green/red status dot reflects the actual process state via pidfile.
-
-### Logs
-
-```bash
-# Live log
-tail -f /var/log/devicemonitor.log
-
-# Filter by type
-grep EMAIL /var/log/devicemonitor.log
-grep WEBHOOK /var/log/devicemonitor.log
-grep SCAN /var/log/devicemonitor.log
-```
-
----
-
-## Plugin structure
+## How it works
 
 ```
-src/
-├── etc/
-│   ├── rc.d/
-│   │   └── devicemonitor              # FreeBSD rc.d service script
-│   └── inc/
-│       └── plugins.inc.d/
-│           └── devicemonitor.inc      # Service registration for Diagnostics → Services
-├── opnsense/
-│   ├── mvc/app/
-│   │   ├── controllers/OPNsense/DeviceMonitor/
-│   │   │   ├── IndexController.php
-│   │   │   └── Api/
-│   │   │       ├── ConfigController.php
-│   │   │       ├── DevicesController.php
-│   │   │       └── ServiceController.php
-│   │   ├── models/OPNsense/DeviceMonitor/
-│   │   │   ├── DeviceMonitor.php
-│   │   │   ├── DeviceMonitor.xml
-│   │   │   ├── defaults.json
-│   │   │   ├── Metadata/
-│   │   │   │   └── service.xml        # MVC service metadata
-│   │   │   ├── Menu/Menu.xml
-│   │   │   └── ACL/ACL.xml
-│   │   └── views/OPNsense/DeviceMonitor/
-│   │       ├── devices.volt
-│   │       ├── settings.volt
-│   │       └── service_widget.volt
-│   ├── scripts/OPNsense/DeviceMonitor/
-│   │   ├── monitor_daemon.py          # Background daemon
-│   │   ├── scan_network.py            # Network scan script
-│   │   ├── daemon_status.sh           # Reliable status check via pidfile
-│   │   ├── NotificationHandler.php
-│   │   ├── notify_email.php
-│   │   └── notify_webhook.php
-│   ├── service/conf/actions.d/
-│   │   └── actions_devicemonitor.conf # configd action definitions
-│   └── www/js/widgets/
-│       ├── DeviceMonitor.js           # Lobby dashboard widget
-│       └── Metadata/
-│           └── DeviceMonitor.xml      # Widget metadata and endpoints
+monitor_daemon.py
+    ├── reads  /var/db/devicemonitor/config.json   (rendered from config.xml)
+    ├── reads  /var/db/hostwatch/hosts.db          (OPNsense host discovery)
+    ├── writes /var/db/devicemonitor/devices.db    (devices, notification queue)
+    └── runs   scan_network.py on the scan interval, and the queue every 30s
+
+configd
+    ├── devicemonitor start|stop|restart      service control
+    ├── devicemonitor status                  pidfile check
+    ├── devicemonitor scan                    manual scan
+    ├── devicemonitor processQueue            deliver queued notifications
+    └── devicemonitor sendEmailNotification | sendWebhookNotification
 ```
 
-### Runtime files
+Settings live in `config.xml` through the `General` model and are rendered into
+`config.json` by a configd template; the scanner and the notification scripts
+read that file.
+
+## Files and endpoints
 
 ```
-/var/run/devicemonitor.pid             # Daemon PID
-/var/log/devicemonitor.log             # Log file
-/var/db/devicemonitor/
-├── devices.db                         # SQLite device database
-└── config.json                        # Runtime configuration
-/etc/rc.conf.d/devicemonitor           # Autostart flag
+src/etc/                      rc.d script, service registration, log rotation
+src/opnsense/mvc/             controllers, models, views, forms, translations
+src/opnsense/scripts/         daemon, scanner, notification handlers
+src/opnsense/service/         configd actions and templates
+src/opnsense/www/             Lobby widget
+tests/                        run without a firewall; CI runs all of them
 ```
 
-### API endpoints
+Runtime:
+
+```
+/var/run/devicemonitor.pid
+/var/log/devicemonitor.log
+/var/db/devicemonitor/devices.db
+/var/db/devicemonitor/config.json
+/etc/rc.conf.d/devicemonitor
+```
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/devicemonitor/devices/stats` | Total and online device count |
-| GET | `/api/devicemonitor/service/status` | Daemon status (running/stopped) |
-| POST | `/api/devicemonitor/service/start` | Start daemon |
-| POST | `/api/devicemonitor/service/stop` | Stop daemon |
-| POST | `/api/devicemonitor/service/restart` | Restart daemon |
-| POST | `/api/devicemonitor/service/scan` | Trigger manual scan |
-| GET | `/api/devicemonitor/config/get` | Get configuration |
-| POST | `/api/devicemonitor/config/set` | Save configuration |
-| POST | `/api/devicemonitor/config/testemail` | Send test email |
-| POST | `/api/devicemonitor/config/testwebhook` | Send test webhook |
-
----
-
-## How the daemon works
-
-```
-monitor_daemon.py (background process)
-    │
-    ├── reads /var/db/devicemonitor/config.json  (scan interval, enabled flag)
-    ├── reads /var/db/hostwatch/hosts.db          (OPNsense native discovery)
-    ├── writes /var/db/devicemonitor/devices.db   (known devices, notification queue)
-    └── writes /var/log/devicemonitor.log
-
-configd (OPNsense configuration daemon)
-    │
-    ├── devicemonitor start   → service devicemonitor start || true
-    ├── devicemonitor stop    → service devicemonitor stop || true
-    ├── devicemonitor restart → service devicemonitor restart || true
-    └── devicemonitor status  → daemon_status.sh (pidfile check, always exit 0)
-
-rc.d/devicemonitor
-    │
-    ├── uses /usr/sbin/daemon -f -p /var/run/devicemonitor.pid python3 monitor_daemon.py
-    ├── procname="/usr/local/bin/python3"   (needed for stop to find the process)
-    └── default: devicemonitor_enable="NO"  (activated by /etc/rc.conf.d/devicemonitor)
-```
-
----
+| GET | `/api/devicemonitor/devices/search` | Device list |
+| GET | `/api/devicemonitor/devices/stats` | Total and online counts |
+| POST | `/api/devicemonitor/devices/delete` | Delete one device |
+| POST | `/api/devicemonitor/devices/clear` | Clear the database |
+| POST | `/api/devicemonitor/devices/updatehostname` | Set a custom name |
+| POST | `/api/devicemonitor/devices/pingdevice` | Check reachability |
+| GET | `/api/devicemonitor/devices/queue` | Pending notifications |
+| POST | `/api/devicemonitor/devices/retryqueue` | Retry the queue now |
+| POST | `/api/devicemonitor/devices/discardqueue` | Drop the queue |
+| GET | `/api/devicemonitor/settings/get` | Read settings |
+| POST | `/api/devicemonitor/settings/set` | Write settings |
+| POST | `/api/devicemonitor/config/testemail` | Send a test email |
+| POST | `/api/devicemonitor/config/testWebhook` | Send a test webhook |
+| GET | `/api/devicemonitor/config/getinterfaces` | Interface descriptions |
+| GET | `/api/devicemonitor/service/status` | Daemon status |
+| POST | `/api/devicemonitor/service/start\|stop\|restart` | Service control |
+| POST | `/api/devicemonitor/service/scan` | Trigger a scan |
+| POST | `/api/devicemonitor/service/reconfigure` | Re-render config and restart |
 
 ## Troubleshooting
 
-### Plugin does not appear in Services
+Watch what the plugin is doing, with **Log level** set to `debug`:
 
 ```bash
-# Verify the .inc file exists (NOT .php!)
-ls /usr/local/etc/inc/plugins.inc.d/devicemonitor.inc
-
-# Verify PHP can load the function
-php -r "require_once('/usr/local/etc/inc/plugins.inc.d/devicemonitor.inc'); var_dump(devicemonitor_services());"
-
-# Reload plugin registry
-/usr/local/etc/rc.configure_plugins
+tail -f /var/log/devicemonitor.log
+grep WEBHOOK /var/log/devicemonitor.log
 ```
 
-### Daemon control shows "Execute error"
+**A notification never arrives.** Check the Pending notifications panel on the
+Devices page: if the event is queued, the panel shows the reason the endpoint
+gave. `Test webhook` on the settings page reports the same detail directly.
+
+**Daemon control shows "Execute error".**
 
 ```bash
-# Check that daemon_status.sh exists and is executable
-ls -la /usr/local/opnsense/scripts/OPNsense/DeviceMonitor/daemon_status.sh
-
-# Test it manually (must print "running" or "stopped", never an error)
 sh /usr/local/opnsense/scripts/OPNsense/DeviceMonitor/daemon_status.sh
-
-# Check configd actions are loaded
 configctl configd actions | grep devicemonitor
 ```
 
-### Multiple zombie daemon processes
+The status script must print `running` or `stopped` and never fail.
+
+**The daemon does not start.**
 
 ```bash
-# Check how many are running
-ps aux | grep monitor_daemon | grep -v grep
-
-# Kill all instances
-pkill -f monitor_daemon.py
-rm -f /var/run/devicemonitor.pid
-
-# Start fresh
-configctl devicemonitor start
-```
-
-Root cause: the RC script was missing `procname`, so `rc.d` could not detect the running process and started a new one every time. Fixed in v2.0 by adding `procname="/usr/local/bin/python3"` to the RC script.
-
-### Widget shows dashes, no data
-
-```bash
-# Verify the stats endpoint works
-curl -k -u "APIKEY:APISECRET" https://localhost/api/devicemonitor/devices/stats
-# Should return: {"total": N, "online": N}
-
-# Verify the status endpoint works
-curl -k -u "APIKEY:APISECRET" https://localhost/api/devicemonitor/service/status
-# Should return: {"result": "running", ...}
-```
-
-If the endpoints return data but the widget still shows dashes, clear browser cache (Ctrl+Shift+R) and check the browser console for JavaScript errors.
-
-### Email notifications not working
-
-```bash
-# Test from command line
-php /usr/local/opnsense/scripts/OPNsense/DeviceMonitor/notify_email.php
-
-# Check logs
-grep EMAIL /var/log/devicemonitor.log
-```
-
-### Daemon won't start
-
-```bash
-# Check log for startup errors
 tail -30 /var/log/devicemonitor.log
-
-# Run daemon manually to see errors
 /usr/local/bin/python3 /usr/local/opnsense/scripts/OPNsense/DeviceMonitor/monitor_daemon.py
-
-# Check that defaults.json is readable
-cat /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/defaults.json
 ```
 
-### Corrupted database
+**The widget shows dashes.** Confirm the endpoint answers, then clear the
+browser cache:
+
+```bash
+curl -k -u "APIKEY:APISECRET" https://localhost/api/devicemonitor/devices/stats
+```
+
+**The database is corrupt.**
 
 ```bash
 cp /var/db/devicemonitor/devices.db /var/db/devicemonitor/devices.db.backup
@@ -662,61 +318,25 @@ rm /var/db/devicemonitor/devices.db
 configctl devicemonitor restart
 ```
 
----
-
-## Uninstallation
-
-### Method 1: uninstall.sh (recommended)
+## Uninstalling
 
 ```bash
-cd /path/to/opnsense-devicemonitor
-sh uninstall.sh
+pkg remove os-devicemonitor
 ```
 
-This removes all files, stops the daemon, disables autostart, and clears caches. The database `/var/db/devicemonitor/devices.db` is deleted.
+Configuration in `config.xml` and the database in `/var/db/devicemonitor` are
+kept. Remove them by hand if you want them gone.
 
-### Method 2: Silent uninstall (preserves database)
+## Credits
 
-```bash
-sh uninstall.sh --silent
-```
+Original plugin by [Hacesoft](https://github.com/hacesoft) ([hacesoft.cz](https://hacesoft.cz)).
+This fork adds the packaging, the notification queue and later features.
 
-Used internally by `install.sh` during upgrades. Removes all files but keeps the database.
+Version history is in the [releases](https://github.com/maxysoft/opnsense-repo/releases),
+each with its changelog.
 
-### Method 3: Manual
-
-```bash
-pkill -f monitor_daemon.py
-rm -f /var/run/devicemonitor.pid
-rm -f /etc/rc.conf.d/devicemonitor
-rm -f /usr/local/etc/rc.d/devicemonitor
-rm -f /etc/rc.d/devicemonitor
-rm -f /usr/local/etc/inc/plugins.inc.d/devicemonitor.inc
-rm -rf /usr/local/opnsense/mvc/app/controllers/OPNsense/DeviceMonitor
-rm -rf /usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor
-rm -rf /usr/local/opnsense/mvc/app/views/OPNsense/DeviceMonitor
-rm -rf /usr/local/opnsense/scripts/OPNsense/DeviceMonitor
-rm -f /usr/local/opnsense/service/conf/actions.d/actions_devicemonitor.conf
-rm -f /usr/local/opnsense/www/js/widgets/DeviceMonitor.js
-rm -f /usr/local/opnsense/www/js/widgets/Metadata/DeviceMonitor.xml
-rm -rf /var/db/devicemonitor        # WARNING: deletes device database
-rm -f /var/log/devicemonitor.log
-/usr/local/etc/rc.configure_plugins
-service configd restart
-```
-
----
-
-## Support
-
-**GitHub Issues:** https://github.com/maxysoft/opnsense-devicemonitor/issues
-
-**Author:**
-- GitHub: [@hacesoft](https://github.com/hacesoft)
-- Web: [hacesoft.cz](https://hacesoft.cz)
-
----
+Issues: [maxysoft/opnsense-devicemonitor](https://github.com/maxysoft/opnsense-devicemonitor/issues)
 
 ## License
 
-BSD 2-Clause License — see [LICENSE](LICENSE)
+BSD 2-Clause — see [LICENSE](LICENSE).

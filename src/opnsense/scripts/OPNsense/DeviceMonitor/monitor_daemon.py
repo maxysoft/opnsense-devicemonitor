@@ -8,18 +8,9 @@ import json
 import subprocess
 from datetime import datetime
 
-# ================================================================
-# KONFIGURACE - ZAPNI/VYPNI FUNKCE
-# ================================================================
 INFO_LOGGING = True   # ← Důležité události (daemon started, scan completed)
 DEBUG_LOGGING = False  # ← Detailní debug zprávy (config loaded každých 10s)
 
-# ================================================================
-# CESTY - VŠECHNO NA JEDNOM MÍSTĚ!
-#
-#          Ukazatel na konfigurační soubor s výchozími hodnotami
-#
-# ================================================================
 defaultsFile = '/usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/defaults.json'
 
 def load_defaults():
@@ -37,8 +28,7 @@ PID_FILE = PATHS['pidFile']
 SCAN_SCRIPT = PATHS['scanScript']
 DEFAULT_CONFIG = _defaults['config']
 
-# Retries have to keep running between scans: a scan interval of an hour must
-# not mean an hour between two attempts at the same failed notification.
+# Retries run independently of the scan interval.
 QUEUE_INTERVAL = 30
 # ================================================================
 
@@ -219,9 +209,8 @@ def main():
                     run_scan()
                     last_scan = current_time
 
-            # Deliberately outside the enabled check: a notification that is
-            # already queued has to reach its destination even if monitoring
-            # is switched off afterwards.
+            # Outside the enabled check: an already queued notification still has to
+            # reach its destination.
             if time.time() - last_queue >= QUEUE_INTERVAL:
                 run_queue()
                 last_queue = time.time()

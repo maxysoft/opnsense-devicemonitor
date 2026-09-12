@@ -1,20 +1,14 @@
 <?php
 /**
- * Payload builders for the webhook channel
- * Path: /usr/local/opnsense/scripts/OPNsense/DeviceMonitor/WebhookPayload.php
+ * Payload builders for the webhook channel.
  *
- * Deliberately free of any OPNsense dependency: the caller resolves interface
- * labels and passes plain rows, so tests/test_apprise_payload.php can exercise
- * the wording and the event mapping without the firewall's class tree.
+ * No OPNsense dependency on purpose: the caller resolves interface labels
+ * and passes plain rows, so tests/ can exercise this without the class tree.
  */
 
 class WebhookPayload
 {
-    /**
-     * Apprise carries the severity in a "type" field, which each target
-     * service renders its own way (ntfy priority, Discord colour, mail
-     * subject prefix). Anything unknown degrades to info rather than failing.
-     */
+    /** Apprise severity per event; each service renders it its own way. */
     const TYPES = [
         'new'  => 'info',
         'up'   => 'success',
@@ -28,12 +22,10 @@ class WebhookPayload
     ];
 
     /**
-     * Build the body Apprise expects.
-     *
-     * @param string $event   new, up or down
-     * @param array  $rows    already-sliced devices, each with mac/vendor/ip/iface
+     * @param string $event    new, up or down
+     * @param array  $rows     already-sliced devices with mac/vendor/ip/iface
      * @param string $hostname firewall reporting the event
-     * @param int    $total   devices in the whole dispatch, to say how many were left out
+     * @param int    $total    devices in the dispatch, to count those left out
      */
     public static function apprise($event, array $rows, $hostname, $total = null)
     {

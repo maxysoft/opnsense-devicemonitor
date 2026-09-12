@@ -5,11 +5,7 @@ namespace OPNsense\DeviceMonitor\Api;
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\DeviceMonitor\DeviceMonitor;
 
-/**
- * DevicesController
- * 
- * API controller pro správu zařízení
- */
+/** Device list, device actions and the notification queue. */
 class DevicesController extends ApiControllerBase
 {
     private function getPaths()
@@ -25,10 +21,7 @@ class DevicesController extends ApiControllerBase
         return [-1];
     }
 
-    /**
-     * Aktualizace custom hostname
-     * POST /api/devicemonitor/devices/updatehostname
-     */
+    /** POST /api/devicemonitor/devices/updatehostname */
     public function updatehostnameAction()
     {
         if ($this->request->isPost()) {
@@ -47,10 +40,7 @@ class DevicesController extends ApiControllerBase
         return ['result' => 'failed'];
     }
 
-    /**
-     * Vyhledání zařízení (pro Bootgrid tabulku)
-     * GET/POST /api/devicemonitor/devices/search
-     */
+    /** GET|POST /api/devicemonitor/devices/search */
     public function searchAction()
     {
         
@@ -169,10 +159,7 @@ class DevicesController extends ApiControllerBase
         }
     }
 
-    /**
-     * Statistiky zařízení
-     * GET /api/devicemonitor/devices/stats
-     */
+    /** GET /api/devicemonitor/devices/stats */
     public function statsAction()
     {
         
@@ -200,10 +187,7 @@ class DevicesController extends ApiControllerBase
         return $result;
     }
 
-    /**
-     * Smazání jednoho zařízení
-     * POST /api/devicemonitor/devices/delete
-     */
+    /** POST /api/devicemonitor/devices/delete */
     public function deleteAction()
     {
         if ($this->request->isPost()) {
@@ -219,11 +203,8 @@ class DevicesController extends ApiControllerBase
     }
 
     /**
-     * Every neighbour the firewall currently has a usable entry for.
-     *
-     * Read directly rather than through configd, whose arp action is cached
-     * for 30 seconds: too stale for a button whose whole job is to answer
-     * "is it up right now". No input reaches either command line.
+     * Read arp(8) and ndp(8) directly: configd's arp action is cached for 30
+     * seconds, too stale for a button that answers "is it up right now".
      */
     private function neighbours()
     {
@@ -235,10 +216,7 @@ class DevicesController extends ApiControllerBase
         return DeviceMonitor::parseNeighbours(implode('', $arp), implode("\n", $ndp));
     }
 
-    /**
-     * Check whether a device is reachable and store the answer
-     * POST /api/devicemonitor/devices/pingdevice
-     */
+    /** POST /api/devicemonitor/devices/pingdevice */
     public function pingdeviceAction()
     {
         if ($this->request->isPost()) {
@@ -254,11 +232,8 @@ class DevicesController extends ApiControllerBase
                 return ['result' => 'failed', 'error' => 'Invalid IP'];
             }
 
-            // One probe, to make the firewall resolve the address. Its own
-            // result is deliberately ignored: a device that drops ICMP still
-            // has to answer ARP or NDP for the probe to arrive. -W is in
-            // milliseconds, which is why the old "-W 1" reported almost
-            // everything as offline.
+            // One probe so the address is resolved; its own result is ignored, since
+            // a device that drops ICMP still answers ARP. -W is in milliseconds.
             $v6 = strpos($ip, ':') !== false;
             @exec(sprintf(
                 '/sbin/ping %s -c 1 -W 1000 -t 2 %s > /dev/null 2>&1',
@@ -298,10 +273,7 @@ class DevicesController extends ApiControllerBase
         return ['result' => 'failed'];
     }
 
-    /**
-     * Vyčištění celé databáze
-     * POST /api/devicemonitor/devices/clear
-     */
+    /** POST /api/devicemonitor/devices/clear */
     public function clearAction()
     {
         if ($this->request->isPost()) {
@@ -316,10 +288,7 @@ class DevicesController extends ApiControllerBase
         return ['result' => 'failed'];
     }
 
-    /**
-     * Notifications whose delivery failed and that are waiting for a retry
-     * GET /api/devicemonitor/devices/queue
-     */
+    /** GET /api/devicemonitor/devices/queue */
     public function queueAction()
     {
         $paths = $this->getPaths();
@@ -386,10 +355,7 @@ class DevicesController extends ApiControllerBase
         return ['rows' => $rows, 'total' => count($rows), 'state' => $state];
     }
 
-    /**
-     * Retry every queued notification now instead of waiting out its delay
-     * POST /api/devicemonitor/devices/retryqueue
-     */
+    /** POST /api/devicemonitor/devices/retryqueue */
     public function retryqueueAction()
     {
         if (!$this->request->isPost()) {
@@ -419,10 +385,7 @@ class DevicesController extends ApiControllerBase
         return $this->queueAction();
     }
 
-    /**
-     * Drop every queued notification
-     * POST /api/devicemonitor/devices/discardqueue
-     */
+    /** POST /api/devicemonitor/devices/discardqueue */
     public function discardqueueAction()
     {
         if (!$this->request->isPost()) {

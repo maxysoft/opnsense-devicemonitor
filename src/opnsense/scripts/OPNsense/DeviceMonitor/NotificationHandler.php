@@ -1,7 +1,6 @@
 <?php
 /**
- * Shared notification handler
- * Path: /usr/local/opnsense/scripts/OPNsense/DeviceMonitor/NotificationHandler.php
+ * Shared notification handler for the email and webhook channels.
  */
 
 // Načtení třídy DeviceMonitor
@@ -14,10 +13,7 @@ class NotificationHandler
     
     private static $logLevel = null;
 
-    /**
-     * "info" or "debug", from the rendered configuration, so the switch in the
-     * GUI takes effect without editing code.
-     */
+    /** Log level from the rendered configuration: "info" or "debug". */
     private static function logLevel()
     {
         if (self::$logLevel === null) {
@@ -49,10 +45,7 @@ class NotificationHandler
         );
     }
 
-    /**
-     * Host and a short path only. Discord and ntfy put a secret in the URL, so
-     * the whole thing must never reach the log.
-     */
+    /** Host only: ntfy and Discord carry a secret in the URL path. */
     private static function redactUrl($url)
     {
         $url = trim((string)$url);
@@ -68,9 +61,8 @@ class NotificationHandler
     }
 
     /**
-     * Verify TLS unless the user opted out for a self-signed endpoint, and
-     * allow only HTTP(S). UrlField accepts gopher:// and dict://, which would
-     * turn the Test button into an SSRF tool aimed at the firewall's own LAN.
+     * Verify TLS unless the user opted out, and allow only HTTP(S):
+     * UrlField also accepts gopher:// and dict://.
      */
     private static function secureCurl($ch)
     {
@@ -84,12 +76,8 @@ class NotificationHandler
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, !$insecure);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $insecure ? 0 : 2);
         if (!$insecure) {
-            // OPNsense writes every authority from System > Trust > Authorities
-            // into /etc/ssl/certs and the bundle below, so an endpoint whose
-            // certificate was issued by the firewall's own CA verifies with no
-            // need to turn verification off. Name those paths rather than
-            // relying on the build-time default: OPNsense deletes
-            // /etc/ssl/cert.pem on purpose and keeps the directory instead.
+            // OPNsense keeps its trust store in /etc/ssl/certs and the bundle below.
+            // Name them: curl's build-time default, /etc/ssl/cert.pem, is removed.
             if (is_dir('/etc/ssl/certs')) {
                 curl_setopt($ch, CURLOPT_CAPATH, '/etc/ssl/certs');
             }
@@ -101,11 +89,7 @@ class NotificationHandler
         curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
     }
 
-    /**
-     * HTTP header values are ASCII. ntfy documents RFC 2047 for anything else,
-     * so encode only when necessary. Note: this was NOT the cause of the
-     * PROTOCOL_ERROR once blamed on it, which was a server-side routing fault.
-     */
+    /** RFC 2047 encoding for a header value that is not plain ASCII. */
     private static function headerValue($value)
     {
         $value = (string)$value;
@@ -127,9 +111,7 @@ class NotificationHandler
     }
 
     
-    /**
-     * Načte zařízení z databáze s notification_pending = 1
-     */
+    /** Devices flagged for the notification being sent. */
     private function loadDevicesFromDb()
     {
         $db_file = \OPNsense\DeviceMonitor\DeviceMonitor::getPath('dbFile');
@@ -164,8 +146,8 @@ class NotificationHandler
     
 
     /**
-     * Odešle zprávu přes interní Direct SMTP helper (Python stdlib smtplib).
-     * SMTP heslo není předáváno v command line; helper si načte config.json.
+     * Direct SMTP through the Python helper, which reads the password
+     * from config.json rather than taking it on the command line.
      */
     private function sendViaDirectSmtp($subject, $html)
     {
@@ -221,9 +203,7 @@ class NotificationHandler
         return ['result' => 'failed', 'message' => 'Direct SMTP error: ' . $detail];
     }
 
-    /**
-     * Původní transport přes lokální /usr/local/sbin/sendmail (typicky os-postfix).
-     */
+    /** Delivery through local sendmail, typically os-postfix. */
     private function sendViaSendmail($email_to, $email_from, $subject, $html)
     {
         $sendmail = '/usr/local/sbin/sendmail';
@@ -267,9 +247,7 @@ class NotificationHandler
         return ['result' => 'failed', 'message' => 'Sendmail error: ' . $detail, 'exit_code' => $ret];
     }
 
-    /**
-     * UNIVERZÁLNÍ EMAIL - test i real - S INLINE STYLES!
-     */
+    /** Test and real email share one builder. */
     public function sendEmail($is_test = false)
     {
         //$this->fLog("=== sendEmail START === Mode: " . ($is_test ? 'TEST' : 'REAL'), 'EMAIL');
@@ -492,10 +470,7 @@ HTML;
         }
     }
 
-    /**
-     * UNIVERZÁLNÍ WEBHOOK - test i real
-     * POST /api/devicemonitor/config/sendWebhook
-     */
+    /** Test and real webhook share one builder. */
     public function sendWebhook($is_test = false, $webhook_url = null)
     {
         
@@ -520,11 +495,8 @@ HTML;
             return ['result' => 'failed', 'message' => 'No webhook URL is set.'];
         }
 
-        // DETEKCE TYPU WEBHOOKU
-        // Sniffing the URL guesses wrong both ways: a self-hosted ntfy on a
-        // host without "ntfy" in the name silently got the generic JSON body,
-        // and a generic endpoint with "discord" anywhere in its path got a
-        // Discord embed. The setting wins; sniffing is only the fallback.
+        // The setting wins; sniffing the URL is only a fallback, and it guessed
+        // wrong both ways.
         $type = null;
         try {
             $cfg = \OPNsense\DeviceMonitor\DeviceMonitor::getConfig();
@@ -712,10 +684,8 @@ HTML;
                     self::secureCurl($ch);
                     
                 } elseif ($type === 'apprise') {
-                    // APPRISE API REAL
-                    // Apprise fans the message out to whatever targets are
-                    // stored under the key in the URL, so the payload stays
-                    // service-neutral: body, title, severity, format.
+                    // Apprise forwards to whatever targets are stored under the key in the
+                    // URL, so the payload stays service-neutral.
                     $rows = [];
                     foreach (array_slice($devices, 0, 10) as $d) {
                         $rows[] = [
@@ -787,10 +757,8 @@ HTML;
             // nothing useful. Report the transport error instead.
             if ((int)$http_code === 0) {
                 $reason = $curl_error !== '' ? $curl_error : 'no response from the server';
-                // 51 and 60 are curl's certificate verification failures. Here
-                // that normally means the issuing authority is not in the
-                // firewall's trust store, which is fixable without weakening
-                // TLS, so say that instead of leaving the raw curl wording.
+                // 51 and 60 are curl's certificate verification failures, which here
+                // usually means the issuing CA is missing from the trust store.
                 if (in_array((int)$curl_errno, [51, 60], true)) {
                     $reason .= '. Import the issuing authority under System > Trust > Authorities,'
                         . ' or tick Skip TLS verification';

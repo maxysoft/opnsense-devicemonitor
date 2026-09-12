@@ -4,12 +4,6 @@ namespace OPNsense\DeviceMonitor;
 
 class DeviceMonitor
 {
-    // ================================================================
-    // CESTY - VŠECHNO NA JEDNOM MÍSTĚ!
-    //
-    //          Ukazatel na konfigurační soubor s výchozími hodnotami
-    //
-    // ================================================================
     private static $defaultsFile = '/usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/defaults.json';
     private static $data = null;
 
@@ -37,9 +31,8 @@ class DeviceMonitor
     private static $interfaceNames = null;
 
     /**
-     * OPNsense interface key => description. The scanner stores the key
-     * against each device, which is what the filters match on, but "opt2"
-     * means nothing to a reader.
+     * OPNsense interface key => description. Devices are stored against the
+     * key, which is what the filters match, but "opt2" means nothing to a reader.
      */
     public static function getInterfaceNames()
     {
@@ -67,11 +60,7 @@ class DeviceMonitor
         return $names;
     }
 
-    /**
-     * Readable label for a stored interface key. Devices on an unassigned
-     * interface keep a generated label instead of a key, so anything unknown
-     * is passed through unchanged.
-     */
+    /** Readable label for an interface key; unknown values pass through. */
     public static function describeInterface($key)
     {
         $key = trim((string)$key);
@@ -92,9 +81,8 @@ class DeviceMonitor
             $json = file_get_contents($configFilePath);
             $savedConfig = json_decode($json, true);
             
-            // Merge saved values over current defaults. This makes newly
-            // added settings (for example Direct SMTP) available immediately
-            // after an upgrade without deleting the existing config.json.
+            // Saved values over current defaults, so a setting added by an upgrade
+            // is available without deleting config.json.
             if ($savedConfig !== null && is_array($savedConfig)) {
                 unset($savedConfig['paths']);
                 $config = array_merge($data['config'], $savedConfig);
@@ -110,31 +98,21 @@ class DeviceMonitor
     }
 
 
-    // ========================================
-    // GETTERY PRO CESTY (pro Controllery)
-    // ========================================
 
-
-    /**
-     * Vrátí cestu k PID souboru
-     */
+    /** Path to the daemon pidfile. */
     public function getPidFilePath()
     {
         return self::getPath('pidFile');
     }
 
     
-    /**
-     * Vrátí cestu k databázi
-     */
+    /** Path to the device database. */
     public function getDbFilePath()
     {
         return self::getPath('dbFile');
     }
     
-    /**
-     * Vrátí cestu ke konfiguračnímu souboru
-     */
+    /** Path to the rendered configuration. */
     public function getConfigFilePath()
     {
         return self::getPath('configFile');
@@ -161,15 +139,9 @@ class DeviceMonitor
     }
 
 
-    // Settings are stored in config.xml through the General model and rendered
-    // into config.json by the configd template, so nothing writes that file
-    // from PHP any more. getConfig() above is the read side, used by the
-    // notification scripts.
+    // Settings live in config.xml and are rendered into config.json by the
+    // configd template; getConfig() above is the read side.
 
-    // ========================================
-    // DATABÁZE
-    // ========================================
-    
     private function getDb()
     {
         $file_mame = self::getPath('dbFile');
@@ -230,10 +202,6 @@ class DeviceMonitor
         chmod($file_mame, 0644);
     }
 
-    // ========================================
-    // ZAŘÍZENÍ - CRUD OPERACE
-    // ========================================
-    
     /**
      * Získání všech zařízení z databáze
      * @return array Seznam zařízení (upravený podle konfigurace)
@@ -258,15 +226,10 @@ class DeviceMonitor
     }
 
     /**
-     * The MACs and addresses the firewall currently has a usable neighbour
-     * entry for, from the output of arp(8) and ndp(8).
-     *
-     * This is what the DHCP leases pages call "online": a device has to answer
-     * ARP, or NDP on IPv6, for any traffic to reach it at all, while plenty of
-     * devices drop ICMP on purpose.
-     *
-     * Incomplete and expired entries are skipped - they mean the firewall
-     * asked and got no answer, which is the opposite of reachable.
+     * MACs and addresses with a usable neighbour entry, from arp(8) and ndp(8).
+     * This is what the DHCP leases pages call "online": a device must answer ARP,
+     * or NDP on IPv6, to receive any traffic, while many drop ICMP by policy.
+     * Incomplete and expired entries mean no answer, so they are skipped.
      */
     public static function parseNeighbours($arpJson, $ndpOutput)
     {
@@ -310,11 +273,9 @@ class DeviceMonitor
     }
 
     /**
-     * Render a timestamp written by the scanner in the firewall's timezone.
-     *
-     * The scanner stores UTC, while PHP here runs with date.timezone set from
-     * System > Settings > General, so parsing without saying UTC reads the
-     * value as local time and shifts every display by the local offset.
+     * Render a stored timestamp in the firewall's timezone. The scanner writes
+     * UTC, and date.timezone here is the configured one, so parsing without
+     * saying UTC would shift every value by the local offset.
      */
     public static function displayTime($value, $format = 'd.m.Y - H:i:s')
     {
@@ -349,10 +310,8 @@ class DeviceMonitor
                 // written by an older version has not been through a scan yet.
                 $row['is_reserved'] = isset($row['is_reserved']) ? (int)$row['is_reserved'] : 0;
 
-                // Devices first seen within the last day, so the list can
-                // point them out. Timestamps are stored in UTC, which is said
-                // explicitly here because time() is UTC too but the display
-                // format below follows the firewall's own timezone.
+                // Flag devices first seen within the last day. time() is UTC, so the
+                // stored value has to be parsed as UTC too.
                 $row['is_new'] = 0;
                 if (!empty($row['first_seen'])) {
                     $firstSeen = strtotime($row['first_seen'] . ' UTC');
@@ -361,9 +320,7 @@ class DeviceMonitor
                     }
                 }
 
-                // Sorting has to use the instant, not the rendered string:
-                // "29.12.2025 - 18:37:51" sorts by day of month first, which
-                // put the list in the wrong order by default.
+                // Sort on the instant: the rendered form starts with the day of month.
                 $row['last_seen_ts'] = !empty($row['last_seen'])
                     ? (int)strtotime($row['last_seen'] . ' UTC') : 0;
 
@@ -425,9 +382,7 @@ class DeviceMonitor
         $db = $this->getDb();
         $db->exec('BEGIN IMMEDIATE TRANSACTION');
         try {
-            // Treat Clear All like repeated manual deletion: remember the
-            // current last_seen value for every device so old Hostwatch
-            // history does not immediately repopulate the table.
+            // Tombstone every device, or Hostwatch history repopulates the table.
             $db->exec('INSERT OR REPLACE INTO deleted_devices (mac, last_seen, deleted_at) SELECT mac, last_seen, CURRENT_TIMESTAMP FROM devices');
             $db->exec('DELETE FROM devices');
             $db->exec('COMMIT');

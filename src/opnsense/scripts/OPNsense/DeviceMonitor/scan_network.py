@@ -12,17 +12,8 @@ import time
 import xml.etree.ElementTree as ET
 import fcntl
 
-# ================================================================
-# KONFIGURACE - ZAPNI/VYPNI FUNKCE
-# ================================================================
 DEBUG_LOGGING = True  # ← Změň na False pro vypnutí logů
 
-# ================================================================
-# CESTY - VŠECHNO NA JEDNOM MÍSTĚ!
-#
-#          Ukazatel na konfigurační soubor s výchozími hodnotami
-#
-# ================================================================
 defaultsFile = '/usr/local/opnsense/mvc/app/models/OPNsense/DeviceMonitor/defaults.json'
 
 def load_defaults():
@@ -168,8 +159,7 @@ def init_db():
     except:
         pass
 
-    # A failed delivery must not lose the event, so notifications are queued
-    # and retried rather than sent once and forgotten.
+    # Queued so a failed delivery is retried instead of lost.
     c.execute('''CREATE TABLE IF NOT EXISTS notification_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         channel TEXT NOT NULL,
@@ -178,8 +168,7 @@ def init_db():
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
 
-    # The retry schedule is a property of the queue, not of one entry, so it
-    # lives in a single row rather than being repeated per notification.
+    # One row: the schedule belongs to the queue, not to an entry.
     c.execute('''CREATE TABLE IF NOT EXISTS notification_retry (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         attempts INTEGER DEFAULT 0,
@@ -437,9 +426,8 @@ def is_recently_seen(last_seen_str, minutes=15):
         return False
     
 
-# Notifications survive a failed delivery. The retry delay belongs to the
-# queue as a whole rather than to a single entry: one failure holds everything
-# back, and the next attempt then flushes all of it in one go.
+# One retry schedule for the whole queue: a failure holds everything back,
+# and the next attempt flushes all of it at once.
 RETRY_BACKOFF = [30, 30, 60, 180, 300, 600, 1800, 3600]
 
 # An endpoint that stays unreachable for days must not grow the database
@@ -548,9 +536,8 @@ def dispatch_queued(channel, event, macs):
     if status in ('sent', 'ok'):
         return True, 'delivered'
     if status == 'skipped':
-        # The channel is switched off or has nothing to report; retrying
-        # cannot help, so the batch is dropped. Logged, because for a user who
-        # disabled the channel to stop the noise this discards the backlog.
+        # Switched off or nothing to report: retrying cannot help. Logged,
+        # because disabling a channel discards its backlog.
         message = str(verdict.get('message', 'skipped'))[:200]
         log(f"[QUEUE] {channel}/{event} dropped without sending: {message}")
         return True, message
@@ -643,10 +630,6 @@ def process_queue():
     return 0
 
 
-# ================================================================
-# HLAVNÍ FUNKCE - REFAKTOROVANÉ
-# ================================================================
-
 def update_status_only():
     """Rychlá aktualizace online/offline statusu z hostwatch DB"""
     log("Quick status update (hostwatch DB)")
@@ -732,9 +715,8 @@ def full_scan():
         last_seen = device.get('last_seen') or now
         first_seen = device.get('first_seen') or now
 
-        # If the user manually deleted this device, ignore the same historical
-        # Hostwatch record. A genuinely newer last_seen means the device has
-        # returned to the network, so remove the tombstone and add it again.
+        # A deleted device stays deleted until Hostwatch sees it again with a
+        # genuinely newer last_seen.
         deleted_row = conn.execute(
             'SELECT last_seen FROM deleted_devices WHERE mac = ?', (mac,)
         ).fetchone()
@@ -799,9 +781,8 @@ def full_scan():
             mac, is_now = row[0], (row[7] or 0)
             if mac in new_macs or mac not in prior_active:
                 continue
-            # Nesledované rozhraní není výpadek. Řídí se podle rozhraní na
-            # řádku, ne podle toho, co tento sken přeskočil: zařízení, které
-            # mezitím vypadlo z hostwatch, by se jinak ohlásilo jako offline.
+            # A de-selected interface is not an outage. Judged by the row's own
+            # interface, not by what this scan skipped.
             if monitor_ifs and (row[4] or '') not in monitor_ifs:
                 continue
             was = prior_active[mac]

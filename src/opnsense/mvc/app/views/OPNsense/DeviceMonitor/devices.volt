@@ -179,8 +179,7 @@ $(document).ready(function() {
         }});
     }
 
-    // Notifications that could not be delivered yet. The panel stays hidden
-    // while the queue is empty, which is the normal case.
+    // Hidden while the queue is empty, which is the normal case.
     function loadQueue() {
         $.ajax({url:'/api/devicemonitor/devices/queue',type:'GET',success:function(d){
             var rows = (d && d.rows) || [];
@@ -324,9 +323,8 @@ $(document).ready(function() {
 
     // Filtrování
     function applyFilters() {
-        // No early return on an empty set: clearing the database, deleting the
-        // last device or filtering everything out all have to reach
-        // renderTable(), otherwise the table keeps showing what was there.
+        // No early return on an empty set, or the table keeps showing what was
+        // there after a clear or a delete.
         allRows = allRows || [];
         var filtered = allRows.filter(function(r){
             var vo = !activeVlans.length || activeVlans.indexOf(r.vlan) !== -1;
@@ -396,10 +394,8 @@ $(document).ready(function() {
             return;
         }
         rows.forEach(function(row) {
-            // Built as DOM nodes on purpose. hostname comes from a DHCP
-            // reservation description, a Dnsmasq override or the rename box,
-            // none of which are escaped anywhere on the way in, so string
-            // concatenation into .html() would execute whatever it contains.
+            // DOM nodes, not concatenated markup: hostname comes from a DHCP
+            // reservation, a Dnsmasq override or the rename box, none of them escaped.
             var statusHtml = row.status==='online'
                 ? '<span style="color:#4CAF50;font-weight:bold;white-space:nowrap;"><i class="fa fa-circle"></i> ONLINE</span>'
                 : '<span style="color:#666;font-weight:bold;white-space:nowrap;"><i class="fa fa-circle-o"></i> OFFLINE</span>';
@@ -478,8 +474,7 @@ $(document).ready(function() {
         });
     }
 
-    // Delegated: the table is rebuilt every 30 seconds, and rebinding a
-    // handler per row on each render is pure waste.
+    // Delegated: the table is rebuilt every 30 seconds.
     $(document).on('click', '.command-delete', function(){
         var mac=$(this).data('row-mac');
         if (!confirm(translations.confirm_delete+' '+mac+'?')) return;
