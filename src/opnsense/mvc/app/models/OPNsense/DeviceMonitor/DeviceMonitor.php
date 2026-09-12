@@ -261,6 +261,18 @@ class DeviceMonitor
                 // written by an older version has not been through a scan yet.
                 $row['is_reserved'] = isset($row['is_reserved']) ? (int)$row['is_reserved'] : 0;
 
+                // Devices first seen within the last day, so the list can
+                // point them out. Timestamps are stored in UTC, which is said
+                // explicitly here because time() is UTC too but the display
+                // format below follows the firewall's own timezone.
+                $row['is_new'] = 0;
+                if (!empty($row['first_seen'])) {
+                    $firstSeen = strtotime($row['first_seen'] . ' UTC');
+                    if ($firstSeen !== false && (time() - $firstSeen) < 86400) {
+                        $row['is_new'] = 1;
+                    }
+                }
+
                 // Formátuj datum do českého formátu: 29.12.2025 - 18:37:51
                 if (!empty($row['last_seen'])) {
                     $timestamp = strtotime($row['last_seen']);

@@ -135,6 +135,8 @@ $(document).ready(function() {
         unnamed:        '{{ lang._('unnamed') }}',
         reserved:       '{{ lang._('RESERVED') }}',
         reserved_hint:  '{{ lang._('This MAC has a DHCP reservation') }}',
+        new_device:     '{{ lang._('NEW') }}',
+        new_hint:       '{{ lang._('First seen in the last 24 hours') }}',
         no_devices:     '{{ lang._('No devices recorded yet. They appear after the next scan.') }}',
         none_match:     '{{ lang._('No devices match the current filters.') }}',
         queue_retry:    '{{ lang._('Retry now') }}',
@@ -419,8 +421,16 @@ $(document).ready(function() {
             var vlanLabel = row.vlan||'';
             if (row.vlan && vlanNames[row.vlan]) vlanLabel += ' \u2013 '+vlanNames[row.vlan];
 
+            var $mac = $('<td>').css('white-space','nowrap').text(row.mac||'');
+            if (Number(row.is_new)) {
+                $mac.append(' ', $('<span class="label label-success">')
+                    .css({'font-size':'10px','margin-left':'2px'})
+                    .attr('title', translations.new_hint)
+                    .text(translations.new_device));
+            }
+
             $('<tr>').append(
-                $('<td>').text(row.mac||''),
+                $mac,
                 $ip,
                 $('<td>').append($hostname),
                 $('<td>').text(row.vendor||''),
